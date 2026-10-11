@@ -3866,7 +3866,13 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
         return b
       }
       mGrid.append(mkMusic('⏮ 上一首', 'prev'), mkMusic('⏯ 播放·暂停', 'toggle'),
-        mkMusic('⏭ 下一首', 'next'), mkMusic('🎵 打开挂件面板', 'open-panel'))
+        mkMusic('⏭ 下一首', 'next'))
+      // 「打开挂件面板」只在**装了挂件**时才出：本仓库的目标是让挂件可退休，
+      // 没有挂件时这个按钮点了什么也不会发生（对第一次装的人是纯困惑）。
+      if (typeof window !== 'undefined'
+        && (typeof window.dshwMediaNow === 'function' || typeof window.dshwMediaCtl === 'function')) {
+        mGrid.appendChild(mkMusic('🎵 打开挂件面板', 'open-panel'))
+      }
       mbox.appendChild(mGrid)
 
       // —— 本地音乐（宿主自己的 music.json / music-file，E1 从挂件搬来）——

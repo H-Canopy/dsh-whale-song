@@ -11,8 +11,16 @@ MIT license correctly).
 
 ## 1. 代码 / Code
 
-- **范围 / Scope**：`lib/`、`tools/`、`cordis.patch.yml`、`assets/pet.js`
-- **许可 / License**：**MIT**，Copyright © 2026 **Andersen216**（全文见 [`LICENSE`](LICENSE)）
+- **范围 / Scope**：`lib/`、`tools/`、`assets/pet.js`、`assets/media-*.js`、`sources/`、`cordis.patch.yml`
+- **许可 / License**：**MIT**
+  - 上游部分 Copyright © 2026 **Andersen216**（全文见 [`LICENSE`](LICENSE)）
+  - 本 fork 增量 Copyright © 2026 **H-Canopy**
+- **这是 fork / This is a fork**：`H-Canopy/dsh-whale-song` 派生自
+  [Andersen216/dsh-whale-girl-live2d](https://github.com/Andersen216/dsh-whale-girl-live2d)（MIT）。
+  按 CC BY-NC-SA 4.0 的"说明修改"要求，**本 fork 相对上游做过哪些改动**逐条记在
+  [`PLAN-OURS.md`](PLAN-OURS.md) 第四节；一句话版本：接入 Windows 媒体会话（SMTC）统一层、
+  本地音乐播放（含音频 Range）、音源适配器插口（网易云点播）、音乐页签与相关设置，
+  并从 whale-widget 迁入本地音乐/在线电台的宿主服务。
 
 ## 2. 美术素材 / Artwork
 
@@ -42,5 +50,6 @@ NC / SA conditions attached to the character artwork itself.
 
 ---
 
-有任何权利主张 / For any rights claim: 见 [`PROVENANCE.md`](PROVENANCE.md) 末尾的联系方式
-（或直接开一个 [Issue](https://github.com/Andersen216/dsh-whale-girl-live2d/issues)）。
+有任何权利主张 / For any rights claim：见 [`PROVENANCE.md`](PROVENANCE.md) 末尾的联系方式，
+或在本 fork 仓库开一个 [Issue](https://github.com/H-Canopy/dsh-whale-song/issues)
+（上游仓库 <https://github.com/Andersen216/dsh-whale-girl-live2d/issues> 也可以）。

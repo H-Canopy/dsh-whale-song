@@ -234,7 +234,17 @@ console.log('\n--- 统一层被关掉 / 没检测到播放器 ---')
   const textEmpty = empty.flat(empty.render())
   ok(/还没检测到/.test(textEmpty), '没会话时给出"打开播放器放一首"的提示', textEmpty.slice(0, 160))
   ok(/现在没在放什么/.test(textEmpty), '并说明现在没在放', textEmpty.slice(0, 200))
-  ok(empty.buttons(empty.render()).length >= 4, '四个遥控按钮仍然在（可用性不依赖有没有会话）', String(empty.buttons(empty.render()).length))
+  ok(empty.buttons(empty.render()).length >= 3, '遥控按钮与有没有会话无关（可用性不依赖它）', String(empty.buttons(empty.render()).length))
+  // 「打开挂件面板」是**挂件专属**：没装挂件就不该出现（对第一次装的人是纯困惑）
+  const emptyBtns = empty.buttons(empty.render())
+  ok(emptyBtns.length === 3 && !emptyBtns.some((b) => /挂件面板/.test(b.text)),
+    '没装挂件时：三个遥控按钮在，「打开挂件面板」不出现', emptyBtns.map((b) => b.text).join(' / '))
+  const withWidget = makeEnv({
+    smtc: { players: () => [{ app: 'cloudmusic.exe', name: '网易云音乐', title: 'X', status: 'Playing', playing: true }], current: () => null },
+    window: { dshwMediaCtl: () => ({ ok: true }) },
+  })
+  const wBtns = withWidget.buttons(withWidget.render())
+  ok(wBtns.some((b) => /挂件面板/.test(b.text)), '装了挂件时：「打开挂件面板」才出现', wBtns.map((b) => b.text).join(' / '))
 }
 
 console.log('\n结果：pass ' + pass + ' / fail ' + fail)

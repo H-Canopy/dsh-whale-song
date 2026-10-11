@@ -4,11 +4,13 @@
 
 | 角色 | 署名 |
 | --- | --- |
-| **插件作者** —— 把模型接进 DSH Web GUI、写联动/菜单/交互/测试 | **Andersen216**（<https://github.com/Andersen216>） |
+| **上游作者** —— 把模型接进 DSH Web GUI、写联动/菜单/交互/测试 | **Andersen216**（<https://github.com/Andersen216>） |
+| **本 fork 增量** —— 系统媒体会话（SMTC）统一层、本地音乐播放、音源适配器与网易云点播、音乐页签与相关设置 | **H-Canopy**（<https://github.com/H-Canopy>） |
 
-代码按 **MIT** 许可发布（见 [`LICENSE`](LICENSE)）。
-署名为 **Andersen216**（与 GitHub 账号同名，主页 <https://github.com/Andersen216>），
-可作为 `package.json` 的 `author` 字段与 `LICENSE` 的版权行。
+代码按 **MIT** 许可发布（见 [`LICENSE`](LICENSE)）：上游部分版权归 **Andersen216**，
+本 fork 增量部分版权归 **H-Canopy**。本仓库是
+[Andersen216/dsh-whale-girl-live2d](https://github.com/Andersen216/dsh-whale-girl-live2d) 的 fork；
+**改动清单**见 [`PLAN-OURS.md`](PLAN-OURS.md)（CC BY-NC-SA 4.0 要求"说明修改"）。
 
 ## 美术素材（模型、贴图、表情、动作）
 
