@@ -26,6 +26,7 @@ const SUITES = [
   ['偏好与简报', 'test-prefs.mjs'],
   ['花费额度提示', 'test-spend.mjs'],
   ['音源适配器', 'test-sources.mjs'],
+  ['音乐 skill 文档', 'test-skill-music.mjs'],
 ]
 
 const results = []

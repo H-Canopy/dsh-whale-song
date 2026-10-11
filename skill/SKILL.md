@@ -198,3 +198,26 @@ clearMotionPose()   // 把动作写过的参数设回 getParameterDefaultValue()
   长内容留给正常回复，桌宠只做提示。
 - **不要**用 `say` 代替真正的回复——`say` 只弹气泡，不进会话、不影响对话内容，
   用户看不到它出现在聊天记录里。
+
+## 七、音乐：点播走对话，不走面板
+
+用户说「放首歌」「点一首」「给我放周杰伦的晴天」「切下一首」「现在在放什么」——**就在对话里做**，
+不要指望面板里有搜索框（**故意没有**：桌宠面板内容区只有 258px 高，再塞搜索会把按钮挤出可见区；
+而用户来找你的时候本来就在打字，对话还能多轮更正）。
+
+**点播（网易云，走官方客户端，不解码不碰账号）**：
+
+```powershell
+& $node D:\Plugins\dsh-netease\netease-cli.mjs search "晴天 周杰伦"   # 先搜：出来一堆翻唱/钢琴版
+& $node D:\Plugins\dsh-netease\netease-cli.mjs play "晴天 周杰伦"     # 搜 + 播（优先免费档 fee=8）
+& $node D:\Plugins\dsh-netease\netease-cli.mjs play --id <歌曲id>     # 指定那一条
+& $node D:\Plugins\dsh-netease\netease-cli.mjs play --list <歌单id>   # 整单（会顶掉客户端当前队列）
+& $node D:\Plugins\dsh-netease\netease-cli.mjs now | pause | resume | next | prev | launch | doctor
+```
+
+- `now/pause/...` 走 **SMTC**，对任何播放器都管用（网易云 / QQ音乐 / PotPlayer / VLC / 浏览器）。
+- 同名翻唱极多（实测搜「晴天 周杰伦」10 条里只有 1 条原唱）：**拿不准先列 3~5 条让用户选**。
+- `fee=8` 免费档、`fee=1` 会员（多数只试听）、`fee=0` 无版权 —— **优先 8**。
+- **测试时不要乱放歌**：要验证就"切成用户正在听的下一首再切回来"，或先拿显式授权。
+- 更全的说明（含宿主自带那套 `/dsh-pet/media`、`/dsh-whale/music.json` 路由与本地音乐文件夹）见
+  同目录的 `whale-song-music.md`。
