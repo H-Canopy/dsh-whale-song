@@ -28,6 +28,8 @@ const SUITES = [
   ['音源适配器', 'test-sources.mjs'],
   ['音乐 skill 文档', 'test-skill-music.mjs'],
   ['单机模式（无后端）', 'test-standalone.mjs'],
+  ['独立壳的本地服务', 'test-shell-server.mjs'],
+  ['独立壳的窗口逻辑', 'test-shell-window.mjs'],
 ]
 
 const results = []

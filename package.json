@@ -44,6 +44,11 @@
     "test:media:live": "node tools/test-media-route.mjs --live",
     "test:smtc": "node tools/test-media-smtc.mjs",
     "test:music-pane": "node tools/test-music-pane.mjs",
+    "test:shell": "node tools/test-shell-window.mjs",
+    "standalone": "node tools/serve-standalone.mjs",
+    "desktop:install": "pnpm install",
+    "desktop:start": "electron desktop/standalone",
+    "desktop:dist": "electron-builder --win --x64 --publish never",
     "smoke": "node tools/smoke.mjs",
     "shot": "node tools/shot.mjs",
     "test:e2e": "node tools/e2e.mjs",
@@ -96,5 +101,9 @@
   },
   "bugs": {
     "url": "https://github.com/H-Canopy/dsh-whale-song/issues"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
   }
 }

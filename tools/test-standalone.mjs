@@ -18,8 +18,10 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.join(HERE, '..')
-const PORT = 41998
-const CDP_PORT = 9801
+// 端口都**随机挑**（别写死）：写死的话，全量并发跑测试时两个用例会抢同一个端口，
+// 表现就是"单独跑全过、一起跑挂一条"（实测踩过：test-shell-server 与它都用 980x 段）。
+const PORT = 41000 + Math.floor(Math.random() * 4000)
+const CDP_PORT = 9600 + Math.floor(Math.random() * 300)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 let pass = 0

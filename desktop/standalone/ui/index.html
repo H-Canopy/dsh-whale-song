@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DS 鲸鱼娘桌宠</title>
+<!--
+  独立桌宠壳里的页面（Electron 窗口用）。
+  与 standalone/index.html 的区别：那一份是给**浏览器里看 demo** 的（带说明表），
+  这一份是**她本体** —— 全透明背景，只有她，窗口无边框、置顶、点击穿透。
+
+  需要的资源都从同一个本地迷你服务（desktop/standalone/server.mjs）取：
+  pet.js 自己会按 BASE 去拿 vendor/ 与 model/，媒体会话走 /dsh-pet/media。
+  DSH 专属能力（事件流/钱包/说话）在这个模式下没有，前端会安静降级。
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+</style>
+</head>
+<body>
+<script>
+  // 基址就是本机迷你服务（同源），保持默认 /dsh-pet 即可
+  window.__DSH_PET_BOOT__ = { config: { enabled: true }, standalone: true }
+</script>
+<!-- 与 DSH 宿主注入的那一套保持一致（宿主是往 index.html 里注入这三个 + pet.js）：
+     pet.js 本体 · media-smtc 统一层（读/遥控系统媒体会话）· media-local 本地音乐 · media-bridge 让她跟着音乐动 -->
+<script src="/dsh-pet/pet.js"></script>
+<script src="/dsh-pet/media-smtc.js"></script>
+<script src="/dsh-pet/media-local.js"></script>
+<script src="/dsh-pet/media-bridge.js"></script>
+</body>
+</html>

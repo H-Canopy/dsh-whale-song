@@ -72,7 +72,9 @@
   // 而这两个目录正好都在 assets/ 里；宿主接口（/events、/hud…）在这个模式下会 404，
   // 前端对这些失败本来就有兜底，所以她照常渲染与互动。
   (function () {
-    var base = new URL('../assets/', location.href).href
+    // 注意去掉尾斜杠：pet.js 会自己拼 BASE + '/model/...'，留着尾斜杠会拼出
+    // ".../assets//model/..."（双斜杠）。静态服务器通常能容忍，但 file:// 下会 404。
+    var base = new URL('../assets/', location.href).href.replace(/\/+$/, '')
     window.__DSH_PET_BASE__ = base
     window.__DSH_PET_BOOT__ = { config: { enabled: true }, base: base, standalone: true }
   })()
