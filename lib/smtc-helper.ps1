@@ -1,8 +1,12 @@
-# smtc-helper.ps1 -- one-shot Windows SMTC (media session) bridge for the NetEase Cloud
-# Music ("netease") backend of dsh-whale-widget.
+# smtc-helper.ps1 -- one-shot Windows SMTC (media session) bridge for the whale-song pet
+# host (lib/index.js). Originally written for the NetEase-only backend of
+# dsh-whale-widget; now the host-side "unified layer": ANY player that publishes a media
+# session (NetEase / QQ Music / Kugou / Spotify / foobar2000 / PotPlayer / VLC / browsers)
+# can be read and controlled through the same contract.
 #
 # Contract with the host (lib/index.js):
-#   powershell.exe -NoProfile -ExecutionPolicy Bypass -File smtc-helper.ps1 -Cmd <get|play|pause|next|prev>
+#   powershell.exe -NoProfile -ExecutionPolicy Bypass -File smtc-helper.ps1 `
+#     -Cmd <get|play|pause|next|prev> [-App '<regex>'] [-List]
 #     stdout : EXACTLY one line of UTF-8 JSON -- nothing else, ever
 #     stderr : diagnostics only (the host forwards them to its console on failure)
 #     exit   : always 0; success/failure travels inside the JSON, so a non-zero exit from
@@ -12,8 +16,20 @@
 # Output shapes (the host parses stdout as JSON, so these keys are a contract):
 #   get                -> {"ok":true,"nowPlaying":{"title":"","artist":"","status":"Playing","appId":"cloudmusic.exe"}}
 #   get, no session    -> {"ok":true,"nowPlaying":null}
-#   play/pause/next/prev -> {"ok":true,"did":"pause"}
+#   -List              -> {"ok":true,"sessions":[{"appId":"","title":"","artist":"","status":""}]}
+#   play/pause/next/prev -> {"ok":true,"did":"pause","appId":"cloudmusic.exe"}
 #   any failure        -> {"ok":false,"error":"no-session" | "smtc-unavailable" | "control-failed"}
+#
+# Which session is "the" session:
+#   default (no -App)  -> the NetEase Cloud Music session only. The media session list is
+#                         shared machine-wide (browsers, other players, DSH itself can all
+#                         publish sessions), so a filter is the whole safety boundary of this
+#                         helper: without one we would be pausing whatever the user happens to
+#                         be watching in Chrome. The default therefore never widens by itself.
+#   -App '<regex>'     -> first session whose AppId matches the regex, case-insensitive.
+#                         '-App ".*"' = "whatever session exists" (used by the unified layer
+#                         once the user has picked a player).
+#   -List              -> enumerate every session; no filter, no control, read-only.
 #
 # Why ASCII-only: Windows PowerShell 5.1 decodes .ps1 files as ANSI unless they carry a
 # UTF-8 BOM, so a non-ASCII byte here would be mangled on a non-UTF8 system codepage.
@@ -26,7 +42,14 @@
 param(
   [Parameter(Mandatory = $true)]
   [ValidateSet('get', 'play', 'pause', 'next', 'prev')]
-  [string]$Cmd
+  [string]$Cmd,
+
+  # Session filter (regex, case-insensitive). Empty = keep the original NetEase-only default
+  # so existing callers cannot accidentally widen their reach.
+  [string]$App = '',
+
+  # Enumerate all media sessions (read-only; takes priority over -Cmd).
+  [switch]$List
 )
 
 $ErrorActionPreference = 'Stop'
@@ -60,6 +83,60 @@ function Write-Failure([string]$Reason) {
 }
 function Write-Diag([string]$Message) {
   try { [Console]::Error.WriteLine('[smtc] ' + $Message) } catch { }
+}
+
+# The AppId is the only handle we have on a session, and reading it must never throw
+# (a session can disappear between GetSessions() and the property read).
+function Get-SessionAppId($Session) {
+  try { return [string]$Session.SourceAppUserModelId } catch { return '' }
+}
+
+# First session whose AppId matches $Pattern. An empty pattern keeps the historical
+# NetEase-only behaviour. Over-long patterns are treated as "matches nothing" instead of
+# being handed to .NET's regex engine, where a pathological expression could hang us.
+function Select-Session($Manager, [string]$Pattern) {
+  $effective = $Pattern
+  if ([string]::IsNullOrEmpty($effective)) { $effective = '(?i)cloudmusic|netease' }
+  if ($effective.Length -gt 128) {
+    Write-Diag 'app filter too long (>128), ignoring'
+    return $null
+  }
+  $sessions = @()
+  try { $sessions = $Manager.GetSessions() } catch { $sessions = @() }
+  foreach ($candidate in $sessions) {
+    $candidateId = Get-SessionAppId $candidate
+    if ([string]::IsNullOrEmpty($candidateId)) { continue }
+    try {
+      if ($candidateId -match $effective) { return $candidate }
+    } catch {
+      Write-Diag ('bad app filter, treating as no match: ' + $_.Exception.Message)
+      return $null
+    }
+  }
+  return $null
+}
+
+# Read title/artist/status for one session. Shared by `get` and `-List` so both report the
+# same field set.
+function Read-SessionInfo($Session) {
+  $title = ''
+  $artist = ''
+  try {
+    $propsType = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties, Windows.Media.Control, ContentType = WindowsRuntime]
+    $props = Await-Operation ($Session.TryGetMediaPropertiesAsync()) $propsType
+    $title = [string]$props.Title
+    $artist = [string]$props.Artist
+  } catch {
+    Write-Diag ('media properties unavailable: ' + $_.Exception.Message)
+  }
+  $status = ''
+  try { $status = [string]$Session.GetPlaybackInfo().PlaybackStatus } catch { $status = '' }
+  return @{
+    appId  = (Get-SessionAppId $Session)
+    title  = $title
+    artist = $artist
+    status = $status
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -98,42 +175,30 @@ try {
   $managerType = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
   $manager = Await-Operation ($managerType::RequestAsync()) $managerType
 
-  # Only ever touch NetEase Cloud Music's own session. The media session list is shared
-  # machine-wide (browsers, other players, DSH itself can all publish sessions), so the
-  # AppId filter is the whole safety boundary of this helper: without it we would be
-  # pausing whatever the user happens to be watching in Chrome. Measured AppId for the
-  # official client is "cloudmusic.exe"; "netease" is accepted as a defensive alias.
-  $session = $null
-  $sessions = @()
-  try { $sessions = $manager.GetSessions() } catch { $sessions = @() }
-  foreach ($candidate in $sessions) {
-    $candidateId = ''
-    try { $candidateId = [string]$candidate.SourceAppUserModelId } catch { $candidateId = '' }
-    if ($candidateId -match '(?i)cloudmusic|netease') { $session = $candidate; break }
+  # --- read-only enumeration: every session on this machine ------------------
+  if ($List) {
+    $all = @()
+    try { $all = $manager.GetSessions() } catch { $all = @() }
+    $rows = @()
+    foreach ($one in $all) {
+      try { $rows += Read-SessionInfo $one } catch {
+        Write-Diag ('skipping session: ' + $_.Exception.Message)
+      }
+    }
+    Write-Result @{ ok = $true; sessions = $rows }
+    exit 0
   }
+
+  $session = Select-Session $manager $App
 
   if ($Cmd -eq 'get') {
     if ($null -eq $session) {
-      # No NetEase session == "nothing is playing as far as we are concerned". This is not
+      # No matching session == "nothing is playing as far as we are concerned". This is not
       # an error: the host turns it into nowPlaying:null and the frontend shows "not running".
       Write-Result @{ ok = $true; nowPlaying = $null }
       exit 0
     }
-    $propsType = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties, Windows.Media.Control, ContentType = WindowsRuntime]
-    $props = Await-Operation ($session.TryGetMediaPropertiesAsync()) $propsType
-    $status = ''
-    try { $status = [string]$session.GetPlaybackInfo().PlaybackStatus } catch { $status = '' }
-    $appId = ''
-    try { $appId = [string]$session.SourceAppUserModelId } catch { $appId = '' }
-    Write-Result @{
-      ok         = $true
-      nowPlaying = @{
-        title  = [string]$props.Title
-        artist = [string]$props.Artist
-        status = $status
-        appId  = $appId
-      }
-    }
+    Write-Result @{ ok = $true; nowPlaying = (Read-SessionInfo $session) }
     exit 0
   }
 
@@ -157,7 +222,9 @@ try {
   }
   $done = Await-Operation $operation ([bool])
   if ($done -eq $true) {
-    Write-Result @{ ok = $true; did = $Cmd }
+    # Report which session actually took the command: with -App ".*" the caller cannot know
+    # otherwise, and the client uses this to highlight the player that is really in effect.
+    Write-Result @{ ok = $true; did = $Cmd; appId = (Get-SessionAppId $session) }
   } else {
     Write-Failure 'control-failed'
   }

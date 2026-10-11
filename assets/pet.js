@@ -3778,36 +3778,86 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     panes.appendChild($('div', 'dshp-hint dshp-now', menuStatusLine()))
 
     // —— 鲸歌（dsh-whale-song）增量 ③：独立的「音乐」页签 ——
-    // 遥控挂件暴露的 window.dshwMediaCtl，作用于**挂件当前音源**（本地音乐 / 在线电台 / 网易云），
-    // 所以这里不需要知道在放哪一路。用"开头就 return"的方式加页，不碰她下面那条 if 链。
+    // 两块状态源，优先级与媒体桥一致：
+    //   ① window.dshwSongSMTC —— 我们自己的统一层（系统媒体会话 SMTC）：不装挂件也能用，
+    //      并且能**列出检测到的播放器**（网易云 / QQ音乐 / PotPlayer / 浏览器…），选中的那个高亮
+    //   ② window.dshwMediaNow / dshwMediaCtl —— 挂件那套（本地音乐 / 在线电台 / 网易云）
+    // 用"开头就 return"的方式加页，不碰她下面那条 if 链。
     if (id === 'music') {
       const mbox = $('div', 'dshp-box')
+      const smtc = (typeof window !== 'undefined' && window.dshwSongSMTC) ? window.dshwSongSMTC : null
+
+      // 有统一层就用统一层控制（作用于"当前生效播放器"），没有才退回挂件遥控
       const callCtl = (cmd) => {
+        if (smtc && typeof smtc.control === 'function') return smtc.control(cmd)
         try { return (typeof window.dshwMediaCtl === 'function') ? window.dshwMediaCtl(cmd) : null } catch (err) { return null }
       }
-      const nowFn = (typeof window !== 'undefined' && typeof window.dshwMediaNow === 'function') ? window.dshwMediaNow : null
-      let now = null
-      try { now = nowFn ? nowFn() : null } catch (err) { now = null }
-      const srcName = (now && now.source === 'radio') ? '在线电台' : ((now && now.source === 'netease') ? '网易云' : '本地音乐')
-      mbox.appendChild($('div', 'dshp-hint', (now && now.ok)
-        ? ('正在' + (now.playing ? '播放' : '暂停') + '：' + now.title + (now.artist ? ' — ' + now.artist : '') + '（' + srcName + '）')
-        : '现在没在放什么（挂件没装，或还没开始播放）'))
+      const showResult = (label, r) => {
+        const ok = r && (r.ok === true || typeof r.then === 'function')
+        const msg = (r && r.reason) ? r.reason : ((r && r.error) ? String(r.error) : '挂件没装，遥控不可用')
+        try { ui.bubble.show(ok ? (label + ' ✓') : msg, { name: 'DS 鲸鱼娘', ttl: 2200 }) } catch (err) {}
+      }
+
+      if (smtc && typeof smtc.enabled === 'function' && !smtc.enabled()) {
+        mbox.appendChild($('div', 'dshp-hint', '系统媒体读取已在设置里关掉（设置 → 系统媒体读取）。打开后这里会列出检测到的播放器。'))
+      } else if (smtc) {
+        const players = (typeof smtc.players === 'function' ? smtc.players() : []) || []
+        const cur = (typeof smtc.current === 'function' ? smtc.current() : null) || null
+        const pin = (typeof smtc.picked === 'function' ? smtc.picked() : '') || ''
+        if (!players.length) {
+          mbox.appendChild($('div', 'dshp-hint', '还没检测到正在放东西的播放器（打开网易云/QQ音乐/PotPlayer 随便放一首，这里几秒内就会出现）'))
+        } else {
+          mbox.appendChild($('div', 'dshp-hint', '检测到 ' + players.length + ' 个播放器' + (pin ? '（已固定跟随：' + smtc.prettyName(pin) + '）' : '（跟随系统：谁在放谁算数）')))
+          const pgrid = $('div', 'dshp-grid')
+          for (const p of players) {
+            const on = cur && cur.app === p.app
+            const b = $('button', 'dshp-chip' + (on ? ' dshp-on' : ''), (on ? '● ' : '') + p.name)
+            b.title = (p.title ? (p.title + (p.artist ? ' — ' + p.artist : '')) : '（没在放）') + '\n点击＝固定跟随这个播放器；再点一次取消'
+            b.addEventListener('click', () => {
+              smtc.pick(on && !pin ? '' : p.app)
+              renderPane('music')
+            })
+            pgrid.appendChild(b)
+          }
+          mbox.appendChild(pgrid)
+          if (pin) {
+            const resetRow = $('div', 'dshp-row')
+            const auto = $('button', 'dshp-btn', '跟随系统（谁在放跟谁）')
+            auto.addEventListener('click', () => { smtc.pick(''); renderPane('music') })
+            resetRow.appendChild(auto)
+            mbox.appendChild(resetRow)
+          }
+        }
+        mbox.appendChild($('div', 'dshp-hint', cur && cur.title
+          ? ('正在' + (cur.playing ? '播放' : '暂停') + '：' + cur.title + (cur.artist ? ' — ' + cur.artist : '') + '（' + cur.name + '）')
+          : '现在没在放什么'))
+      } else {
+        const nowFn = (typeof window !== 'undefined' && typeof window.dshwMediaNow === 'function') ? window.dshwMediaNow : null
+        let now = null
+        try { now = nowFn ? nowFn() : null } catch (err) { now = null }
+        const srcName = (now && now.source === 'radio') ? '在线电台' : ((now && now.source === 'netease') ? '网易云' : '本地音乐')
+        mbox.appendChild($('div', 'dshp-hint', (now && now.ok)
+          ? ('正在' + (now.playing ? '播放' : '暂停') + '：' + now.title + (now.artist ? ' — ' + now.artist : '') + '（' + srcName + '）')
+          : '现在没在放什么（挂件没装，或还没开始播放）'))
+      }
+
       const mGrid = $('div', 'dshp-grid')
       const mkMusic = (label, cmd) => {
         const b = $('button', 'dshp-chip', label)
         b.addEventListener('click', () => {
           const r = callCtl(cmd)
-          try {
-            ui.bubble.show((r && r.ok) ? (label + ' ✓') : ((r && r.error) || '挂件没装，遥控不可用'), { name: 'DS 鲸鱼娘', ttl: 2200 })
-          } catch (err) {}
-          renderPane('music')
+          // 统一层是异步的（要等宿主回话），挂件那套是同步返回
+          if (r && typeof r.then === 'function') r.then((res) => { showResult(label, res); renderPane('music') })
+          else { showResult(label, r); renderPane('music') }
         })
         return b
       }
       mGrid.append(mkMusic('⏮ 上一首', 'prev'), mkMusic('⏯ 播放·暂停', 'toggle'),
         mkMusic('⏭ 下一首', 'next'), mkMusic('🎵 打开挂件面板', 'open-panel'))
       mbox.appendChild(mGrid)
-      mbox.appendChild($('div', 'dshp-hint', '遥控作用于挂件当前音源；电台是直播流，没有上一首/下一首'))
+      mbox.appendChild($('div', 'dshp-hint', smtc
+        ? '遥控作用于当前生效的播放器（点上面的播放器可固定跟随；电台是直播流，没有上一首/下一首）'
+        : '遥控作用于挂件当前音源；电台是直播流，没有上一首/下一首'))
       panes.appendChild(mbox)
       return
     }
@@ -4135,8 +4185,8 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
         return b
       }
       toggleRow.append(mkToggle('显示工作简报', 'songShowReports'), mkToggle('显示内心想法', 'songInnerVoice'),
-        mkToggle('显示联动文字气泡', 'songBubble'))
-      const toggleHint = $('div', 'dshp-hint', '内心想法＝自言自语/喊饿（待机时才有）；联动文字气泡＝她思考/干活时冒的 agent 文字')
+        mkToggle('显示联动文字气泡', 'songBubble'), mkToggle('读系统媒体', 'songSystemMedia'))
+      const toggleHint = $('div', 'dshp-hint', '内心想法＝自言自语/喊饿（待机时才有）；联动文字气泡＝她思考/干活时冒的 agent 文字\n读系统媒体＝直接问 Windows「谁在放歌」（网易云/QQ音乐/PotPlayer/浏览器都算，不用装挂件）；只有你点音乐页按钮才会遥控播放')
 
       box.append(songTitle, briefRow, briefHint, toggleRow, toggleHint)
       // （音乐遥控已挪到独立的「音乐」页签，不放在设置页里）
@@ -4934,6 +4984,8 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     if (!('songShowReports' in CFG)) CFG.songShowReports = true
     if (!('songInnerVoice' in CFG)) CFG.songInnerVoice = true
     if (!('songBubble' in CFG)) CFG.songBubble = true
+    // 读系统媒体（SMTC）：默认开——这是"不装挂件也能用"的那条路。关掉后前端一次请求都不发。
+    if (!('songSystemMedia' in CFG)) CFG.songSystemMedia = true
     // 本块在 main() 被调用之前执行 ⇒ 上面先落默认值，随后 main() 里的 restoreCfg() 再覆盖成上次保存的
   } catch (err) {}
   function dshwSongPrefs(patch) {
@@ -4943,10 +4995,11 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
         if (patch.briefing === 'off' || patch.briefing === 'stats' || patch.briefing === 'full') CFG.songBriefing = patch.briefing
         if (typeof patch.innerVoice === 'boolean') CFG.songInnerVoice = patch.innerVoice
         if (typeof patch.bubble === 'boolean') CFG.songBubble = patch.bubble
+        if (typeof patch.systemMedia === 'boolean') CFG.songSystemMedia = patch.systemMedia
         persistCfg()
       }
     } catch (err) {}
-    return { briefing: CFG.songBriefing, showReports: !!CFG.songShowReports, innerVoice: !!CFG.songInnerVoice, bubble: !!CFG.songBubble }
+    return { briefing: CFG.songBriefing, showReports: !!CFG.songShowReports, innerVoice: !!CFG.songInnerVoice, bubble: !!CFG.songBubble, systemMedia: CFG.songSystemMedia !== false }
   }
   // 任务简报分档：替换上游那行 pushReport('任务简报', 回复正文)
   function dshwSongBrief(text) {

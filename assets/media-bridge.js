@@ -1,10 +1,13 @@
 // ============================================================================
-// media-bridge.js —— 鲸歌（dsh-whale-song）的媒体桥：让她知道"挂件那边在放什么"
+// media-bridge.js —— 鲸歌（dsh-whale-song）的媒体桥：让她知道"现在在放什么"
 // ----------------------------------------------------------------------------
-// 【依赖方向】本模块只**读**别人的状态，不要求对方知道我们存在：
-//   ① 首选 window.dshwMediaNow()  —— 挂件 dsh-whale-widget 暴露的只读接口
-//   ② 兜底 GET /dsh-whale/netease.json 的 nowPlaying（挂件宿主的路由，仅回环可用）
-//   两者都没有 = 挂件没装或没在放 → 一声不响（不报错、不打扰、不刷屏）
+// 【依赖方向】本模块只**读**别人的状态，不要求对方知道我们存在；四路依次尝试：
+//   ① window.dshwSongSMTC.now() —— 我们自己的统一层（系统媒体会话 SMTC，见 media-smtc.js）。
+//      不依赖任何插件，网易云/QQ音乐/PotPlayer/浏览器都算 ⇒ **首选**
+//   ② window.dshwMediaNow()     —— 挂件 dsh-whale-widget 暴露的只读接口（同页面）
+//   ③ GET /dsh-whale/netease.json 的 nowPlaying（挂件宿主的路由，仅回环可用）
+//   都没有 = 没在放 → 一声不响（不报错、不打扰、不刷屏）
+//   注：① 在设置里关掉时（songSystemMedia=false）自动跳过，等价回到以前的行为。
 //
 // 【行为】只在状态发生变化时动一次：
 //   开始/继续播放 → setUserFace('happy'|'listening') + report(头顶信封，曲名/歌手/音源)
@@ -38,7 +41,17 @@
     try { return window.dshwSongBridgeReports === true } catch (err) { return false }
   }
 
-  // ① 挂件暴露的只读接口（同页面）
+  // ① 我们自己的统一层（系统媒体会话）：不依赖挂件，任何播放器都算
+  function readSystem() {
+    try {
+      var api = window.dshwSongSMTC
+      if (!api || typeof api.now !== 'function') return null
+      var r = api.now()
+      return (r && r.ok) ? r : null
+    } catch (err) { return null }
+  }
+
+  // ② 挂件暴露的只读接口（同页面）
   function readGlobal() {
     try {
       var fn = window.dshwMediaNow
@@ -48,7 +61,7 @@
     } catch (err) { return null }
   }
 
-  // ② 兜底：挂件宿主的路由（挂件没暴露接口时用；没有挂件时 404/401，静默忽略）
+  // ③ 兜底：挂件宿主的路由（挂件没暴露接口时用；没有挂件时 404/401，静默忽略）
   function readRoute(cb) {
     try {
       fetch('/dsh-whale/netease.json', { credentials: 'omit' })
@@ -73,6 +86,7 @@
 
   function sourceName(s) {
     if (s.source === 'radio') return '在线电台'
+    if (s.source === 'system') return s.player ? String(s.player) : '系统播放器'
     if (s.source === 'netease') return '网易云'
     return '本地音乐'
   }
@@ -114,8 +128,12 @@
     }
   }
 
+  // 音源优先级：统一层（系统媒体会话）→ 挂件接口 → 挂件宿主路由。
+  // 统一层放最前是因为它**不依赖任何插件**；设置里关掉它时 enabled() 会拦住，行为回到从前。
   function tick() {
     if (bridgeOff()) return
+    var sys = readSystem()
+    if (sys) { apply(sys); return }
     var g = readGlobal()
     if (g) { apply(g); return }
     readRoute(function (r) { if (r) apply(r) })

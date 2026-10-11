@@ -361,6 +361,31 @@ see [`docs/作者按键表-对照.md`](docs/作者按键表-对照.md)), so noth
 
 ---
 
+## 🎵 「音乐」页签：她怎么知道在放什么（fork 增量）
+
+菜单里多一页 **音乐**。她有两套状态源，**优先用第一套**（因为它不依赖任何插件）：
+
+| 优先级 | 来源 | 能用的播放器 |
+| --- | --- | --- |
+| ① **系统媒体会话（SMTC）** | Windows 自己的媒体会话表，经宿主回环路由 `/dsh-pet/media` 读 | 网易云 / QQ音乐 / 酷狗 / Spotify / foobar2000 / PotPlayer / VLC / 浏览器…**只要它往外发会话** |
+| ② 挂件 `dsh-whale-widget` | `window.dshwMediaNow()`，或挂件宿主路由 `/dsh-whale/netease.json` | 挂件支持的那些（本地音乐 / 在线电台 / 网易云） |
+
+- 音乐页会**列出检测到的播放器**，当前生效的那个高亮（`●`）；点一下＝固定跟随它
+  （固定跟随时，遥控只作用于它，不会误动别的播放器），点「跟随系统」＝回到"谁在放跟谁"。
+- 四个按钮：上一首 / 播放·暂停 / 下一首 / 打开挂件面板。**只有你点按钮才会遥控播放**，
+  平时她只是安静地读。
+- 不想让她读系统媒体：`设置 → 读系统媒体`（关掉后前端**一次请求都不发**）。
+- 遥控与读取都只在本机回环路由上（过 DSH 的信任栅栏）；命令是固定白名单，参数不透传。
+  她不会读你的账号 cookie，也不会替你登录任何平台。
+
+> **English**: the **Music** tab prefers Windows' own media-session table (SMTC) over the widget,
+> so she reacts to whatever player you actually use (NetEase / QQ Music / PotPlayer / VLC / browsers…).
+> It lists detected players, highlights the one in effect, and lets you pin one. Reading is passive;
+> playback control only happens when you press a button. Turn it all off in
+> **Settings → 读系统媒体**, and the frontend stops issuing requests entirely.
+
+---
+
 ## 💰 右键 = 钱包（余额 / 本轮消耗 / 峰谷计价）
 
 | 显示 | 说明 |
@@ -538,14 +563,20 @@ dsh-whale-girl-live2d/
 ├── cordis.patch.yml         挂载声明
 ├── screenshots.json         插件市场详情页用的截图清单
 ├── lib/index.js             宿主侧：静态资源 + SSE 事件桥 + prompt 反向通道 + 自检页
+├── lib/smtc-helper.ps1      统一层助手：读/遥控 Windows 媒体会话（SMTC），-App 过滤 + -List 枚举
 ├── assets/
 │   ├── pet.js               前端本体：Live2D 渲染 / 情绪 rig / 状态机 / 气泡 / 输入框
+│   ├── media-smtc.js        fork 增量：统一层前端（列播放器 / 选当前生效 / 遥控），挂 window.dshwSongSMTC
+│   ├── media-bridge.js      fork 增量：媒体桥（四路回退 → 换表情/简报/动作）
 │   ├── vendor/              Live2D Cubism Core · PIXI 6.5.10 · pixi-live2d-display 0.4.0
 │   └── model/               模型本体 + 由 tools/build-model.mjs 生成的清单
+├── sources/                 fork 增量：音源适配器插口（契约 README + 加载器 + netease 适配器）
 ├── tools/
 │   ├── build-model.mjs      把 VTube Studio 原始素材整理成可消费的形态
 │   ├── preview-server.mjs   脱离 DSH 的预览 + 假 agent 事件发生器
 │   ├── pet-ctl.mjs          agent / 命令行驱动桌宠
+│   ├── test-media-route.mjs 宿主 /dsh-pet/media 路由的行为测试（--live 打真机 SMTC）
+│   ├── test-media-smtc.mjs  统一层前端的行为测试
 │   ├── smoke.mjs            浏览器内功能自检
 │   └── shot.mjs             CDP 截图
 ├── docs/                    截图、作者按键表对照、发布说明

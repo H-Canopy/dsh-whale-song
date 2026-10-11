@@ -138,6 +138,55 @@ console.log('\n--- 媒体桥：没挂件接口时走宿主路由兜底 ---')
     '兜底：简报里写明网易云与曲名', rep && String(rep.body).replace(/\n/g, ' | '))
 }
 
+console.log('\n--- 媒体桥：统一层（系统媒体会话）优先 ---')
+{
+  // ① 有统一层时：即使挂件接口也在，也以统一层为准（它不依赖任何插件）
+  const env = makeEnv()
+  env.win.dshwSongSMTC = {
+    now: () => ({
+      ok: true, source: 'system', app: 'cloudmusic.exe', player: '网易云音乐',
+      title: '统一层的歌', artist: '某歌手', detail: 'Playing', playing: true, body: '',
+    }),
+  }
+  env.win.dshwMediaNow = () => localProvider({ title: '挂件的歌' })
+  env.win.dshwSongBridgeReports = true
+  env.tick()
+  const rep = env.calls.filter((c) => c.kind === 'report').pop()
+  ok(!!rep && String(rep.body).indexOf('统一层的歌') >= 0, '统一层优先于挂件接口', rep && String(rep.body).replace(/\n/g, ' | '))
+  ok(!!rep && String(rep.body).indexOf('音源：网易云音乐') >= 0, '简报里写明是哪个播放器', rep && String(rep.body).replace(/\n/g, ' | '))
+  const face = env.calls.filter((c) => c.kind === 'face').pop()
+  ok(!!face && face.mood === 'happy', '系统播放中 → happy', face && face.mood)
+
+  // ② 统一层说"没在放"（null）时：退回挂件接口，而不是当她没消息
+  const env2 = makeEnv()
+  env2.win.dshwSongSMTC = { now: () => null }
+  env2.win.dshwMediaNow = () => localProvider({ title: '退回挂件' })
+  env2.tick()
+  const face2 = env2.calls.filter((c) => c.kind === 'face').pop()
+  ok(!!face2 && face2.mood === 'happy', '统一层没在放 → 退回挂件接口', face2 && face2.mood)
+
+  // ③ 统一层报暂停 → sleepy
+  const env3 = makeEnv()
+  env3.win.dshwSongSMTC = {
+    now: () => ({
+      ok: true, source: 'system', app: 'PotPlayerMini64.exe', player: 'PotPlayer',
+      title: '电影', artist: '', detail: 'Paused', playing: false, body: '',
+    }),
+  }
+  env3.tick()
+  const face3 = env3.calls.filter((c) => c.kind === 'face').pop()
+  ok(!!face3 && face3.mood === 'sleepy', '统一层暂停 → sleepy', face3 && face3.mood)
+
+  // ④ 统一层抛错也不许把她带崩
+  const env4 = makeEnv()
+  env4.win.dshwSongSMTC = { now: () => { throw new Error('boom') } }
+  env4.win.dshwMediaNow = () => localProvider()
+  let threw = null
+  try { env4.tick() } catch (err) { threw = err }
+  ok(!threw, '统一层抛错：媒体桥不炸', threw && threw.message)
+  ok(env4.calls.filter((c) => c.kind === 'face').length > 0, '统一层抛错后仍能退回挂件接口', '')
+}
+
 console.log('\n--- 媒体桥：调试开关 ---')
 {
   const env = makeEnv()

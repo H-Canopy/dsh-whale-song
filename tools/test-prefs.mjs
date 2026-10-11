@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // test-prefs.mjs —— 简报分档与两个开关的语义测试（毫秒级，不需要浏览器）
 // 做法：从 assets/pet.js 里抠出"鲸歌增量"那一块，塞进 vm 并替掉 pushReport/CFG 依赖，
 // 直接断言三档语义与持久化调用。跑：node tools/test-prefs.mjs
@@ -34,6 +34,11 @@ const B = ctx.__b
 
 ok(P().briefing === 'stats', '默认档 = stats（比她上游安静）', '' + P().briefing)
 ok(P().showReports === true && P().innerVoice === true, '另两个开关默认开（不动她原有手感）', JSON.stringify(P()))
+ok(P().systemMedia === true, '读系统媒体默认开（不装挂件也能知道在放什么）', JSON.stringify(P()))
+ok(P({ systemMedia: false }).systemMedia === false, '读系统媒体可以关', JSON.stringify(P()))
+ok(ctx.CFG.songSystemMedia === false && persisted >= 1, '关掉会落盘（走她自己的 persistCfg）', 'persisted=' + persisted)
+ok(P({ systemMedia: true }).systemMedia === true, '还能再打开', JSON.stringify(P()))
+ok(typeof P({ bubble: 'yes' }).bubble === 'boolean', '非布尔值不会污染设置（照实回当前值）', JSON.stringify(P()))
 B('x'.repeat(80))
 ok(pushed.length === 1 && pushed[0][1].indexOf('正文已隐藏') >= 0 && pushed[0][1].indexOf('x'.repeat(20)) < 0,
   'stats：只报一行、不含回复正文', JSON.stringify(pushed[0] && pushed[0][1]))

@@ -1,6 +1,6 @@
 {
   "name": "dsh-whale-song",
-  "version": "0.4.6-song.1",
+  "version": "0.4.6-song.2",
   "description": "鲸歌（dsh-whale-song）：上游 dsh-whale-girl-live2d 的增强版 fork —— Live2D 鲸鱼娘桌宠（跟着 agent 状态换表情动作）+ 我们额外接入的本地音乐 / 在线电台 / 网易云联动。点一下跟她说话，右键菜单换表情·换装·摆场景·演动作，还能让她给你放歌。（Whale Girl Pet + music: a Live2D companion for the DeepSeek Harness Web UI. Model assets are non-commercial, CC BY-NC-SA 4.0.）",
   "keywords": [
     "dsh",
@@ -20,12 +20,15 @@
     "assets",
     "docs",
     "skill",
+    "sources",
+    "tools",
     "cordis.patch.yml",
     "README.md",
     "CHANGELOG.md",
     "AUTHORS.md",
     "PROVENANCE.md",
     "NOTICE.md",
+    "PLAN-OURS.md",
     "LICENSE"
   ],
   "bin": {

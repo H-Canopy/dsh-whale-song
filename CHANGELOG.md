@@ -1,5 +1,38 @@
 # 更新日志 / Changelog
 
+## 0.4.6-song.2 · 增量 — 2026-10-12
+
+> 本节全部是 **fork 增量**（H-Canopy）；上一节起为上游日志。
+
+### 统一层：不装挂件也能"知道在放什么、并且遥控它"
+
+原来"她知道在放什么"完全依赖挂件（`dsh-whale-widget`）暴露的 `window.dshwMediaNow()`；
+没装挂件就一片空白。现在改成读 **Windows 自己的媒体会话表（SMTC）** —— 网易云 / QQ音乐 /
+酷狗 / Spotify / foobar2000 / PotPlayer / VLC / 浏览器，只要往外发会话就自动可用。
+
+- **`lib/smtc-helper.ps1` 泛化**（原来只认网易云）：新增 `-App '<过滤器>'` 与 `-List`；
+  **不带 `-App` 时行为与以前完全一致**（仍然只认网易云），所以老调用方不会悄悄变宽。
+  安全边界写在文件头：过滤器有长度与字符限制，非法正则按"没匹配"处理。
+- **新宿主路由 `/dsh-pet/media`**（仅回环，过 `connection.requestRejection` 信任栅栏）：
+  `GET ?list=1` 列出全部媒体会话、`GET [?app=]` 读当前曲目、`POST {cmd:'play'|'pause'|'toggle'|'next'|'prev', app?}`
+  遥控。命令是白名单（一个字符都不透传），`toggle` 由宿主读一次状态翻成 play/pause；
+  读结果有 1.5 秒 / 5 秒的短缓存（一次 SMTC 实测约 500ms，前端 2 秒轮询不能每次都起进程），
+  **控制成功后立刻作废读缓存**，失败不进缓存。
+- **新前端 `assets/media-smtc.js`**（统一层前端）：轮询上面的路由，选"当前生效播放器"
+  （正在播的优先，其次有曲目的），`AppId` 换成人话名字，暴露 `window.dshwSongSMTC`
+  （`now()/players()/pick()/control()`）。**默认开、只读**：只有你点音乐页按钮才会发控制命令。
+- **媒体桥改成四路回退**：统一层 → 挂件接口 → 挂件宿主路由 `/dsh-whale/netease.json` → 静默。
+  设置里可整块关掉（`设置 → 读系统媒体`），关掉后前端**一次请求都不发**。
+- **「音乐」页签升级**：列出检测到的播放器，当前生效的高亮（`●`），点一下固定跟随它
+  （再点/点"跟随系统"取消），四个遥控按钮作用于当前生效播放器。
+- **`sources/netease.mjs`**：把网易云点播从挂件搬成**音源适配器**（搜索 → 官方客户端
+  `orpheus://<base64>` 播放，不解码、不碰凭据、不绕会员判定）。以后加 QQ 音乐只是"再插一个文件"。
+
+验证：`test-media-route.mjs` 41/41（另 `--live` 打真机 SMTC 8/8）、`test-media-smtc.mjs` 41/41、
+`test-media-bridge.mjs` 24/24、`test-prefs.mjs` / `test-spend.mjs` / `test-sources.mjs` 全通过。
+真机证据：`-List` 列出 3 个会话（cloudmusic.exe / MSEdge / …）；`-Cmd play` → 状态变 `Playing`
+→ `-Cmd pause` → 状态回 `Paused`（曲目与最终状态与操作前一致）。
+
 ## 0.4.6 — 2026-10-01
 
 ### 宿主识别：不再依赖固定端口，任何人任何端口都能自动对上

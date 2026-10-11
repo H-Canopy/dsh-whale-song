@@ -57,6 +57,46 @@ ok(byName('bad-id.mjs') && byName('bad-id.mjs').ok === false, '非法 id 被拒�
 const usable = await usableSources(tmp)
 ok(usable.length === 1 && usable[0].manifest.id === 'good-one', '可用列表只含通过校验的那个', usable.map((s) => s.manifest.id).join(','))
 
+// —— 真实适配器：网易云（sources/netease.mjs）——
+// 只测"不联网也确定"的部分：manifest 合法、id/能力、播放链接的构造与拒绝规则。
+// 搜索要出网，所以不在这里打真机（点播真机验证要显式授权：见 PLAN-OURS 的记录）。
+{
+  const real = await loadSources(SRC)
+  const ne = real.find((s) => path.basename(s.file) === 'netease.mjs')
+  ok(!!ne && ne.ok === true, '真实适配器 netease.mjs 通过校验', JSON.stringify(ne && ne.errors))
+  ok(!!ne && ne.manifest.id === 'netease' && ne.manifest.capabilities.includes('play'),
+    'netease：id 与能力正确', JSON.stringify(ne && ne.manifest))
+  ok(!!ne && ne.manifest.capabilities.indexOf('control') < 0 && ne.manifest.capabilities.indexOf('readState') < 0,
+    'netease：遥控/读状态不声明（那是统一层 SMTC 的事）', JSON.stringify(ne && ne.manifest.capabilities))
+
+  const mod = ne && ne.mod
+  if (!mod) {
+    ok(false, 'netease：模块可加载', '没拿到 mod')
+  } else {
+    const url = mod.playUrl({ id: '1234567' })
+    ok(url === 'orpheus://' + Buffer.from(JSON.stringify({ type: 'song', id: '1234567', cmd: 'play' }), 'utf8').toString('base64'),
+      'playUrl：orpheus://base64({"type":"song","id","cmd":"play"})', url)
+    const pl = mod.playUrl({ id: '2723543824', kind: 'playlist' })
+    let decoded = null
+    try { decoded = JSON.parse(Buffer.from(String(pl).replace('orpheus://', ''), 'base64').toString('utf8')) } catch (err) {}
+    ok(!!decoded && decoded.type === 'playlist' && decoded.id === '2723543824', 'playUrl：歌单走 type:playlist', JSON.stringify(decoded))
+    ok(mod.playUrl({ id: '12; rm -rf' }) === '', 'playUrl：非纯数字 id 一律拒绝（不拼进协议命令）', JSON.stringify(mod.playUrl({ id: '12; rm -rf' })))
+    ok(mod.playUrl({}) === '' && mod.playUrl(null) === '', 'playUrl：缺 id 时返回空串（调用方据此报错）', String(mod.playUrl({})))
+
+    const bad = await mod.play({}, { id: 'not-a-number' })
+    ok(bad.ok === false && typeof bad.reason === 'string' && bad.reason.length > 0,
+      'play：没有可用 id → ok:false + 人话原因', JSON.stringify(bad))
+
+    const s0 = await mod.search({}, '', 5)
+    ok(s0.ok === false && /空/.test(s0.reason), 'search：空关键词直接拒（不发请求）', JSON.stringify(s0))
+
+    // detect 在没装客户端的机器上应当"说话"而不是假装支持；装了则 ok:true
+    const det = await mod.detect({})
+    ok(det && typeof det.ok === 'boolean' && (det.ok === true || (typeof det.reason === 'string' && det.reason.length > 0)),
+      'detect：要么 ok:true，要么 ok:false + 人话原因（不假装支持）', JSON.stringify(det))
+  }
+}
+
 // —— manifest 校验函数本身 ——
 ok(validateManifest(null).length === 1, 'validateManifest(null) 报错而不是抛异常', JSON.stringify(validateManifest(null)))
 ok(validateManifest({ id: 'x', label: 'y', capabilities: [] }).some((e) => e.includes('长度')), 'id 太短会被指出', JSON.stringify(validateManifest({ id: 'x', label: 'y', capabilities: [] })))
