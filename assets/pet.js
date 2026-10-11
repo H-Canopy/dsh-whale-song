@@ -4534,7 +4534,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     setInterval(() => {
       if (agent.status !== 'idle') return
       if (PERF.low) return                      // 低性能档：不自言自语、不自己找戏
-      if (!dshwSongOpts.innerVoice) return      // 鲸歌增量：单独关掉"内心想法"（不动画质/帧率）
+      if (!CFG.songInnerVoice) return           // 鲸歌增量：单独关掉"内心想法"（不动画质/帧率）
       if (ui.root.classList.contains('dshp-hidden')) return
       if (document.hidden) return
       const now = performance.now()
@@ -4823,47 +4823,47 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
   // ==========================================================================
   // 【鲸歌 dsh-whale-song 增量 ①】简报分档 + 两个开关
   // --------------------------------------------------------------------------
-  // 偏好存在她自己的 layout 对象里（多出来的键上游会忽略，互不干扰）：
-  //   showReports 显示工作简报（关 = 信封/信箱整体静音）
-  //   briefing    任务简报分档：'off' 不报 / 'stats' 只报一行（默认）/ 'full' 上游原文
-  //   innerVoice  显示内心想法（自言自语 / 喊饿）——单独关，不动画质与帧率
+  // 做成 CFG 的键 ⇒ 自动获得她自己的持久化（persistCfg 存原始类型值 / restoreCfg 还原），
+  // 不需要我们再写一套。默认值有意"比她上游更安静"。
+  //   songBriefing    任务简报分档：'off' 不报 / 'stats' 只报一行（默认）/ 'full' 上游原文
+  //   songShowReports 显示工作简报（关 = 信封/信箱整体静音）
+  //   songInnerVoice  显示内心想法（自言自语 / 喊饿）——单独关，不动画质与帧率
   // 运行时：window.dshwSongPrefs() 读；window.dshwSongPrefs({...}) 改（立即生效 + 落盘）。
-  // 为什么只改两处：上游那行会把**回复正文**整段塞进信封（实测看起来像碎片乱码），
-  // 而"内心想法"当时只能靠低性能档一起关掉。两处都是 1 行判断，改动面最小、最好跟上游合并。
+  // 为什么只改两处上游代码：上游那行会把**回复正文**整段塞进信封（实测就是一堆断句碎片），
+  // 而"内心想法"当时只能靠低性能档连帧率一起关。两处各 1 行，最好跟上游合并。
   // ==========================================================================
-  var dshwSongOpts = { showReports: true, briefing: 'stats', innerVoice: true }
   try {
-    var dshwSongSaved = readLayout().song
-    if (dshwSongSaved && typeof dshwSongSaved === 'object') {
-      if (typeof dshwSongSaved.showReports === 'boolean') dshwSongOpts.showReports = dshwSongSaved.showReports
-      if (dshwSongSaved.briefing === 'off' || dshwSongSaved.briefing === 'stats' || dshwSongSaved.briefing === 'full') dshwSongOpts.briefing = dshwSongSaved.briefing
-      if (typeof dshwSongSaved.innerVoice === 'boolean') dshwSongOpts.innerVoice = dshwSongSaved.innerVoice
-    }
+    if (!('songBriefing' in CFG)) CFG.songBriefing = 'stats'
+    if (!('songShowReports' in CFG)) CFG.songShowReports = true
+    if (!('songInnerVoice' in CFG)) CFG.songInnerVoice = true
+    // 本块在 main() 被调用之前执行 ⇒ 上面先落默认值，随后 main() 里的 restoreCfg() 再覆盖成上次保存的
   } catch (err) {}
   function dshwSongPrefs(patch) {
     try {
       if (patch && typeof patch === 'object') {
-        if (typeof patch.showReports === 'boolean') dshwSongOpts.showReports = patch.showReports
-        if (patch.briefing === 'off' || patch.briefing === 'stats' || patch.briefing === 'full') dshwSongOpts.briefing = patch.briefing
-        if (typeof patch.innerVoice === 'boolean') dshwSongOpts.innerVoice = patch.innerVoice
-        saveLayout({ song: { showReports: dshwSongOpts.showReports, briefing: dshwSongOpts.briefing, innerVoice: dshwSongOpts.innerVoice } })
+        if (typeof patch.showReports === 'boolean') CFG.songShowReports = patch.showReports
+        if (patch.briefing === 'off' || patch.briefing === 'stats' || patch.briefing === 'full') CFG.songBriefing = patch.briefing
+        if (typeof patch.innerVoice === 'boolean') CFG.songInnerVoice = patch.innerVoice
+        persistCfg()
       }
     } catch (err) {}
-    return { showReports: dshwSongOpts.showReports, briefing: dshwSongOpts.briefing, innerVoice: dshwSongOpts.innerVoice }
+    return { briefing: CFG.songBriefing, showReports: !!CFG.songShowReports, innerVoice: !!CFG.songInnerVoice }
   }
+  // 任务简报分档：替换上游那行 pushReport('任务简报', 回复正文)
   function dshwSongBrief(text) {
     var t = String(text == null ? '' : text).trim()
     if (!t || t.length <= 60) return
-    if (!dshwSongOpts.showReports) return
-    if (dshwSongOpts.briefing === 'off') return
-    if (dshwSongOpts.briefing === 'full') { pushReport('任务简报', t); return }
+    if (!CFG.songShowReports) return
+    if (CFG.songBriefing === 'off') return
+    if (CFG.songBriefing === 'full') { pushReport('任务简报', t); return }
     var tok = ''
     try { tok = (agent && agent.tokens) ? Number(agent.tokens).toLocaleString() + ' tokens（累计）· ' : '' } catch (err) {}
-    pushReport('任务简报', '本轮已完成 · ' + tok + '正文已隐藏（可在鲸歌设置里改成完整）')
+    pushReport('任务简报', '本轮已完成 · ' + tok + '正文已隐藏（设置里可改成完整）')
   }
+  // 整体静音：包住 pushReport（连她自己的工作简报一起静音）
   var dshwSongOrigPushReport = pushReport
   pushReport = function (title, body) {
-    if (!dshwSongOpts.showReports) return
+    if (!CFG.songShowReports) return
     return dshwSongOrigPushReport(title, body)
   }
   try { window.dshwSongPrefs = dshwSongPrefs } catch (err) {}
