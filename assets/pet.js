@@ -4111,8 +4111,9 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
         paint()
         return b
       }
-      toggleRow.append(mkToggle('显示工作简报', 'songShowReports'), mkToggle('显示内心想法', 'songInnerVoice'))
-      const toggleHint = $('div', 'dshp-hint', '内心想法＝自言自语/喊饿；单独关，不影响画质与帧率')
+      toggleRow.append(mkToggle('显示工作简报', 'songShowReports'), mkToggle('显示内心想法', 'songInnerVoice'),
+        mkToggle('显示联动文字气泡', 'songBubble'))
+      const toggleHint = $('div', 'dshp-hint', '内心想法＝自言自语/喊饿（待机时才有）；联动文字气泡＝她思考/干活时冒的 agent 文字')
 
       box.append(songTitle, briefRow, briefHint, toggleRow, toggleHint)
       // （音乐遥控已挪到独立的「音乐」页签，不放在设置页里）
@@ -4909,6 +4910,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     if (!('songBriefing' in CFG)) CFG.songBriefing = 'stats'
     if (!('songShowReports' in CFG)) CFG.songShowReports = true
     if (!('songInnerVoice' in CFG)) CFG.songInnerVoice = true
+    if (!('songBubble' in CFG)) CFG.songBubble = true
     // 本块在 main() 被调用之前执行 ⇒ 上面先落默认值，随后 main() 里的 restoreCfg() 再覆盖成上次保存的
   } catch (err) {}
   function dshwSongPrefs(patch) {
@@ -4917,10 +4919,11 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
         if (typeof patch.showReports === 'boolean') CFG.songShowReports = patch.showReports
         if (patch.briefing === 'off' || patch.briefing === 'stats' || patch.briefing === 'full') CFG.songBriefing = patch.briefing
         if (typeof patch.innerVoice === 'boolean') CFG.songInnerVoice = patch.innerVoice
+        if (typeof patch.bubble === 'boolean') CFG.songBubble = patch.bubble
         persistCfg()
       }
     } catch (err) {}
-    return { briefing: CFG.songBriefing, showReports: !!CFG.songShowReports, innerVoice: !!CFG.songInnerVoice }
+    return { briefing: CFG.songBriefing, showReports: !!CFG.songShowReports, innerVoice: !!CFG.songInnerVoice, bubble: !!CFG.songBubble }
   }
   // 任务简报分档：替换上游那行 pushReport('任务简报', 回复正文)
   function dshwSongBrief(text) {
@@ -4940,6 +4943,34 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     return dshwSongOrigPushReport(title, body)
   }
   try { window.dshwSongPrefs = dshwSongPrefs } catch (err) {}
+
+  // 鲸歌增量 ④：显示「联动的文字气泡」
+  // 关掉后：她正在思考/干活时，不再把 agent 的思考与回复正文冒成气泡（只做表情与动作）。
+  // 为什么包住 ui.bubble.show/note 而不是改她 23 处调用点：改调用点容易漏、也和上游冲突；
+  // 包一层只加一处。判定用「agent 驱动」的特征（stream/sticky/busy 或 note）＋「非待机」，
+  // 所以她的菜单反馈、我们的音乐反馈（都用 ttl）不会被误伤，待机时的自言自语也不受影响。
+  function dshwSongWrapBubble() {
+    try {
+      if (!ui || !ui.bubble || ui.bubble.__songWrapped) return
+      const origShow = ui.bubble.show
+      const origNote = ui.bubble.note
+      ui.bubble.show = function (text, opts) {
+        try {
+          const agentDriven = !!(opts && (opts.stream || opts.sticky || opts.busy))
+          if (!CFG.songBubble && agentDriven && agent.status !== 'idle') return
+        } catch (err) {}
+        return origShow.apply(ui.bubble, arguments)
+      }
+      ui.bubble.note = function () {
+        try { if (!CFG.songBubble && agent.status !== 'idle') return } catch (err) {}
+        return origNote.apply(ui.bubble, arguments)
+      }
+      ui.bubble.__songWrapped = true
+    } catch (err) {}
+  }
+  dshwSongWrapBubble()
+  // ui.bubble 是主流程里建的，所以再补两次（幂等：包过就跳过）
+  try { setTimeout(dshwSongWrapBubble, 2000); setTimeout(dshwSongWrapBubble, 6000) } catch (err) {}
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', main)
   else main()
