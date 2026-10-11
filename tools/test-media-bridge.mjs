@@ -76,10 +76,10 @@ console.log('\n--- 媒体桥：有她 + 挂件接口 ---')
   env.win.dshwMediaNow = () => localProvider()
   env.tick()
   const face = env.calls.filter((c) => c.kind === 'face').pop()
-  const rep = env.calls.filter((c) => c.kind === 'report').pop()
   ok(!!face && face.mood === 'happy', '开始播放 → 换表情 happy', face && face.mood)
-  ok(!!rep && String(rep.body).indexOf('测试曲') >= 0 && String(rep.title).indexOf('正在播放') >= 0,
-    '开始播放 → 推简报（标题=正在播放、正文带曲名）', rep && rep.title + ' / ' + String(rep.body).split('\n')[0])
+  // 默认**不发**简报：她的信箱是放工作简报的地方，我们切歌就往里塞会把那里搞乱（实测踩过）
+  ok(env.calls.filter((c) => c.kind === 'report').length === 0,
+    '默认不发简报（不刷她的信箱）', 'reports=' + env.calls.filter((c) => c.kind === 'report').length)
   ok(env.calls.filter((c) => c.kind === 'motion').length === 0, '首次同步不演动作（避免一打开就蹦）', '')
 
   const before = env.calls.length
@@ -91,8 +91,16 @@ console.log('\n--- 媒体桥：有她 + 挂件接口 ---')
   env.tick()
   ok(env.calls.filter((c) => c.kind === 'motion').length === 1, '切歌 → 演一次动作', 'motions=' + env.calls.filter((c) => c.kind === 'motion').length)
 
+  // 显式打开简报后：应当推一条，且正文带曲名
+  env.win.dshwSongBridgeReports = true
+  env.win.dshwMediaNow = () => localProvider({ title: '第三首', body: '正在播放：第三首\n音源：本地音乐' })
+  env.tick()
+  const rep = env.calls.filter((c) => c.kind === 'report').pop()
+  ok(!!rep && String(rep.body).indexOf('第三首') >= 0 && String(rep.title).indexOf('正在播放') >= 0,
+    '打开简报后：推一条，标题=正在播放、正文带曲名', rep && rep.title + ' / ' + String(rep.body).split('\n')[0])
+
   // 暂停 → sleepy
-  env.win.dshwMediaNow = () => localProvider({ playing: false, body: '已暂停：第二首\n音源：本地音乐' })
+  env.win.dshwMediaNow = () => localProvider({ title: '第三首', playing: false, body: '已暂停：第三首\n音源：本地音乐' })
   env.tick()
   const face2 = env.calls.filter((c) => c.kind === 'face').pop()
   ok(!!face2 && face2.mood === 'sleepy', '暂停 → 换表情 sleepy', face2 && face2.mood)
@@ -119,6 +127,7 @@ console.log('\n--- 媒体桥：没挂件接口时走宿主路由兜底 ---')
     },
   })
   env.win.dshwMediaNow = undefined
+  env.win.dshwSongBridgeReports = true   // 这个分支要验的是"正文怎么构造"，所以显式打开简报
   env.tick()
   await new Promise((r) => setTimeout(r, 10))   // 等 promise 链
   ok(asked === '/dsh-whale/netease.json', '兜底去读挂件宿主的路由', String(asked))

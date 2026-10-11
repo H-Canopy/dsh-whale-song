@@ -31,6 +31,13 @@
     try { return window.dshwSongBridge === false } catch (err) { return false }
   }
 
+  // 简报开关：她的"信箱/信封"是放**工作简报**的地方，我们每次切歌都塞一条会把那里搞乱
+  //（实测：连着放几首就堆出未读计数，看起来像一堆碎片）。所以默认**不发**简报，
+  // 需要时显式打开 window.dshwSongBridgeReports = true（后续做成设置页里的开关）。
+  function reportsOn() {
+    try { return window.dshwSongBridgeReports === true } catch (err) { return false }
+  }
+
   // ① 挂件暴露的只读接口（同页面）
   function readGlobal() {
     try {
@@ -93,11 +100,14 @@
       }
     } catch (err) {}
 
-    try {
-      if (typeof api.report === 'function') {
-        api.report('🐋 挂件 · ' + (s.playing ? '正在播放' : '已暂停'), s.body || bodyOf(s))
-      }
-    } catch (err) {}
+    // 简报默认不发（见 reportsOn 的说明）：只换表情 + 演动作，不往她的信箱里塞东西。
+    if (reportsOn()) {
+      try {
+        if (typeof api.report === 'function') {
+          api.report('🐋 挂件 · ' + (s.playing ? '正在播放' : '已暂停'), s.body || bodyOf(s))
+        }
+      } catch (err) {}
+    }
 
     if (!first && s.playing) {
       try { if (typeof api.playMotion === 'function') api.playMotion('splash') } catch (err) {}
