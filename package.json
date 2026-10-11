@@ -1,7 +1,7 @@
 {
-  "name": "dsh-whale-girl-live2d",
-  "version": "0.4.6",
-  "description": "鲸鱼娘桌宠：把 Live2D 鲸鱼娘挂进 DSH Web 界面的桌宠插件——模型常驻桌面，跟着 agent 的真实状态换表情与动作，点一下就能直接跟 agent 说话，右键菜单可换表情 / 换装 / 摆场景 / 演小动作。（Whale Girl Pet: a Live2D companion for the DeepSeek Harness Web UI. Model assets are non-commercial, CC BY-NC-SA 4.0.）",
+  "name": "dsh-whale-song",
+  "version": "0.4.6-song.1",
+  "description": "鲸歌（dsh-whale-song）：上游 dsh-whale-girl-live2d 的增强版 fork —— Live2D 鲸鱼娘桌宠（跟着 agent 状态换表情动作）+ 我们额外接入的本地音乐 / 在线电台 / 网易云联动。点一下跟她说话，右键菜单换表情·换装·摆场景·演动作，还能让她给你放歌。（Whale Girl Pet + music: a Live2D companion for the DeepSeek Harness Web UI. Model assets are non-commercial, CC BY-NC-SA 4.0.）",
   "keywords": [
     "dsh",
     "dsh-plugin",
@@ -73,14 +73,19 @@
       "name": "氵六青",
       "url": "https://space.bilibili.com/11272072",
       "role": "Live2D 模型制作（绑定/动作/表情）"
+    },
+    {
+      "name": "H-Canopy",
+      "url": "https://github.com/H-Canopy",
+      "role": "增强版 fork：本地音乐 / 在线电台 / 网易云联动集成（本项目增量）"
     }
   ],
-  "homepage": "https://github.com/Andersen216/dsh-whale-girl-live2d",
+  "homepage": "https://github.com/H-Canopy/dsh-whale-song",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Andersen216/dsh-whale-girl-live2d.git"
+    "url": "git+https://github.com/H-Canopy/dsh-whale-song.git"
   },
   "bugs": {
-    "url": "https://github.com/Andersen216/dsh-whale-girl-live2d/issues"
+    "url": "https://github.com/H-Canopy/dsh-whale-song/issues"
   }
 }

@@ -1,3 +1,26 @@
+<!-- SONG-NOTE-START （本 fork 的定位与归属；上游文档从下一段开始） -->
+> # 🐋 鲸歌 · dsh-whale-song
+>
+> **= 上游桌宠 + 我们接入的音乐能力。** 在上游 [Andersen216/dsh-whale-girl-live2d](https://github.com/Andersen216/dsh-whale-girl-live2d)（MIT）基础上，把 **本地音乐 / 在线电台 / 网易云联动**接进她的状态机与菜单 —— 现在她一边跟着 agent 干活，一边能给你放歌。
+>
+> **安装（本仓库）**
+> ```bash
+> dsh plugin --profile web add github:H-Canopy/dsh-whale-song
+> ```
+> 桌面端（Electron）：在会话里直接说「把 dsh-whale-song 装上」。
+> 本仓库改了包名，所以**与上游包 `dsh-whale-girl-live2d` 可以并存**（互不替换）。
+>
+> **归属与许可（请务必保留）**
+> · 角色形象 © **上善无形**（原作 OC「溟月」）/ **ZipZipPipe**（女仆鲸鱼娘二次设计）
+> · Live2D 模型 © **氵六青**（绑定 / 动作 / 表情）—— **CC BY-NC-SA 4.0：非商业 · 相同方式共享**
+> · 基础插件代码 © **Andersen216**（MIT）；本仓库增量 © **H-Canopy**（MIT）
+> · **本项目非商业**：不收费、不带货、不接广告变现、不作为付费卖点。改编美术请继续按 CC BY-NC-SA 4.0 分发并说明修改。
+>
+> 我们的改动逐条记在 **[PLAN-OURS.md](PLAN-OURS.md)**；上游更新用 `git pull upstream main` 跟。
+>
+> **⚠️ 下面从「网页版一键部署」开始的内容是上游的原始文档**（其中的安装命令、Releases 链接、徽章都指向上游仓库），保留它们是署名的一部分；用本仓库时请以本段的安装命令为准。
+<!-- SONG-NOTE-END -->
+
 <div align="center">
 
 
