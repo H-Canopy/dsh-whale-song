@@ -3712,6 +3712,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       ['decor', '装饰'],
       ['scene', '场景'],
       ['action', '动作'],
+      ['music', '音乐'],
       ['setting', '设置'],
     ]
     u.menu.focused = 'face'
@@ -3752,6 +3753,41 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     panes.textContent = ''
     // 顶上永远有一行「她现在是什么状态」，免得一堆按钮里看不出哪个是开着的
     panes.appendChild($('div', 'dshp-hint dshp-now', menuStatusLine()))
+
+    // —— 鲸歌（dsh-whale-song）增量 ③：独立的「音乐」页签 ——
+    // 遥控挂件暴露的 window.dshwMediaCtl，作用于**挂件当前音源**（本地音乐 / 在线电台 / 网易云），
+    // 所以这里不需要知道在放哪一路。用"开头就 return"的方式加页，不碰她下面那条 if 链。
+    if (id === 'music') {
+      const mbox = $('div', 'dshp-box')
+      const callCtl = (cmd) => {
+        try { return (typeof window.dshwMediaCtl === 'function') ? window.dshwMediaCtl(cmd) : null } catch (err) { return null }
+      }
+      const nowFn = (typeof window !== 'undefined' && typeof window.dshwMediaNow === 'function') ? window.dshwMediaNow : null
+      let now = null
+      try { now = nowFn ? nowFn() : null } catch (err) { now = null }
+      const srcName = (now && now.source === 'radio') ? '在线电台' : ((now && now.source === 'netease') ? '网易云' : '本地音乐')
+      mbox.appendChild($('div', 'dshp-hint', (now && now.ok)
+        ? ('正在' + (now.playing ? '播放' : '暂停') + '：' + now.title + (now.artist ? ' — ' + now.artist : '') + '（' + srcName + '）')
+        : '现在没在放什么（挂件没装，或还没开始播放）'))
+      const mGrid = $('div', 'dshp-grid')
+      const mkMusic = (label, cmd) => {
+        const b = $('button', 'dshp-chip', label)
+        b.addEventListener('click', () => {
+          const r = callCtl(cmd)
+          try {
+            ui.bubble.show((r && r.ok) ? (label + ' ✓') : ((r && r.error) || '挂件没装，遥控不可用'), { name: 'DS 鲸鱼娘', ttl: 2200 })
+          } catch (err) {}
+          renderPane('music')
+        })
+        return b
+      }
+      mGrid.append(mkMusic('⏮ 上一首', 'prev'), mkMusic('⏯ 播放·暂停', 'toggle'),
+        mkMusic('⏭ 下一首', 'next'), mkMusic('🎵 打开挂件面板', 'open-panel'))
+      mbox.appendChild(mGrid)
+      mbox.appendChild($('div', 'dshp-hint', '遥控作用于挂件当前音源；电台是直播流，没有上一首/下一首'))
+      panes.appendChild(mbox)
+      return
+    }
     if (id === 'face') {
       const grid = $('div', 'dshp-grid')
       // 主人抱怨「星星眼重复了两次」——一个表情（参数组合）本来对应好几种情绪，
@@ -4079,29 +4115,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       const toggleHint = $('div', 'dshp-hint', '内心想法＝自言自语/喊饿；单独关，不影响画质与帧率')
 
       box.append(songTitle, briefRow, briefHint, toggleRow, toggleHint)
-
-      // —— 鲸歌增量 ③：音乐遥控 ——
-      // 调挂件（dsh-whale-widget）暴露的 window.dshwMediaCtl，**作用于当前音源**
-      //（本地音乐 / 在线电台 / 网易云），所以这里不需要知道现在放的是哪一路。
-      // 注意在"点击时"才解析该函数：挂件可能比桌宠晚加载。
-      const callCtl = (cmd) => {
-        try { return (typeof window.dshwMediaCtl === 'function') ? window.dshwMediaCtl(cmd) : null } catch (err) { return null }
-      }
-      const musicTitle = $('div', 'dshp-hint', '鲸歌 · 音乐遥控')
-      const musicRow = $('div', 'dshp-row')
-      const mkMusic = (label, cmd) => {
-        const b = $('button', 'dshp-btn', label)
-        b.addEventListener('click', () => {
-          const r = callCtl(cmd)
-          const msg = (r && r.ok) ? (label + ' ✓') : ((r && r.error) || '挂件没装（或没在放），遥控不可用')
-          try { ui.bubble.show(msg, { name: 'DS 鲸鱼娘', ttl: 2200 }) } catch (err) {}
-        })
-        return b
-      }
-      musicRow.append(mkMusic('⏮ 上一首', 'prev'), mkMusic('⏯ 播放·暂停', 'toggle'),
-        mkMusic('⏭ 下一首', 'next'), mkMusic('📋 打开挂件面板', 'open-panel'))
-      const musicHint = $('div', 'dshp-hint', '遥控作用于挂件当前音源（本地音乐 / 在线电台 / 网易云）；电台是直播流，没有上下首')
-      box.append(musicTitle, musicRow, musicHint)
+      // （音乐遥控已挪到独立的「音乐」页签，不放在设置页里）
     } catch (err) {}
 
     const row2 = $('div', 'dshp-row')
