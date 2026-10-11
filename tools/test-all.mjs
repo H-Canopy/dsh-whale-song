@@ -21,6 +21,7 @@ const SUITES = [
   ['统一层前端 media-smtc', 'test-media-smtc.mjs'],
   ['媒体桥 media-bridge', 'test-media-bridge.mjs'],
   ['「音乐」页签', 'test-music-pane.mjs'],
+  ['本地音乐前端', 'test-media-local.mjs'],
   ['本地音乐/电台服务', 'test-media-services.mjs'],
   ['偏好与简报', 'test-prefs.mjs'],
   ['花费额度提示', 'test-spend.mjs'],

@@ -357,9 +357,13 @@ console.log('\n--- 桌面版注入通道（webserver/index-inject）---')
   for (const fn of handlers['webserver/index-inject'] || []) fn(table2)
   const text2 = table2.map((r) => String((r && r.text) || '') + String((r && r.src) || '')).join('\n')
   const petCount = (text2.match(/\/dsh-pet\/pet\.js/g) || []).length
-  ok(table2.length === 3 && petCount === 1, '表里已有 pet.js 时：不重复加它，但仍补上两个增量', table2.length + ' 条 / pet.js 出现 ' + petCount + ' 次')
+  // 期望条数 = 已有的 pet.js 那行 + (我们注入的脚本数 − 1)（pet.js 不重复加）
+  const injectedCount = (text.match(/createElement\("script"\)/g) || []).length
+  ok(table2.length === 1 + injectedCount - 1 && petCount === 1,
+    '表里已有 pet.js 时：不重复加它，但仍补上其余 ' + (injectedCount - 1) + ' 个增量',
+    table2.length + ' 条 / pet.js 出现 ' + petCount + ' 次 / 注入 ' + injectedCount + ' 个')
   ok(text2.indexOf('/dsh-pet/media-smtc.js') >= 0 && text2.indexOf('/dsh-pet/media-bridge.js') >= 0,
-    '补上的正是 media-smtc.js 与 media-bridge.js', JSON.stringify(table2.map((r) => r.kind)))
+    '补上的含 media-smtc.js 与 media-bridge.js', JSON.stringify(table2.map((r) => r.kind)))
   // 每个注入片段都必须带"已存在就不插"的自检，并且 defer=true（顺序不阻塞页面）
   const frag = String((table[0] && table[0].text) || '')
   ok(frag.indexOf('querySelector') >= 0 && frag.indexOf('defer') >= 0, '注入片段自带去重自检 + defer', frag.slice(0, 120))

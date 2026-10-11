@@ -77,11 +77,12 @@ const PAGE = `<!doctype html><html lang="zh"><head><meta charset="utf-8">
 .note{padding:10px 14px;background:#16222e;border-bottom:1px solid #24333f}
 .note b{color:#7fd1ff}</style></head><body>
 <div class="note">harness 页面（不是产品的一部分）：点右下角的鲸鱼娘 → <b>⋯ 菜单</b> → <b>音乐</b> 页签。
-先随便开一个播放器放首歌，这里几秒内就会列出它。</div>
+先随便开一个播放器放首歌，这里几秒内就会列出它；本地音乐那栏要放音频文件才会出现歌单。</div>
 <script>try{document.cookie='dsh_pet_desk=${token}; Path=/dsh-pet'}catch(e){}</script>
 <script>location.reload&&setTimeout(function(){if(document.cookie.indexOf('dsh_pet_desk=')<0)location.reload()},50)</script>
 <script defer src="/dsh-pet/pet.js"></script>
 <script defer src="/dsh-pet/media-smtc.js"></script>
+<script defer src="/dsh-pet/media-local.js"></script>
 <script defer src="/dsh-pet/media-bridge.js"></script>
 </body></html>`
 

@@ -261,6 +261,116 @@ try {
   const file = await shot(path.join(OUT_DIR, 'music-pane.png'))
   console.log('\n  截图：' + file)
 
+  console.log('\n--- 本地音乐栏（宿主自己的播放器）---')
+  {
+    const local = await evaluate(`(() => {
+      const api = window.dshwSongLocal
+      if (!api) return { present: false }
+      const st = api.state() || {}
+      return { present: true, ok: !!st.ok, tracks: (st.tracks || []).length, managed: st.managed || '', names: (st.tracks || []).map((t) => t.name).slice(0, 5), error: st.error || '' }
+    })()`)
+    console.log('  media-local 现场：' + JSON.stringify(local))
+    ok(local && local.present === true, '本地音乐前端已挂上（window.dshwSongLocal）', JSON.stringify(local))
+    ok(local && local.tracks > 0, '读到本地歌单（' + (local && local.tracks) + ' 首：' + ((local && local.names) || []).join(',') + '）', JSON.stringify(local && local.error))
+    const paneText = await evaluate('window.DSHPet.menu().chips.map(function (c) { return c.label }).join(" | ")')
+    // 「本地音乐」是小标题（hint），不在 chips 里；chips 里应当能看到本地播放键与曲目
+    ok(/本地播放/.test(String(paneText)), '本地音乐栏有播放按钮', String(paneText).slice(0, 220))
+    const paneHints = await evaluate('Array.from(document.querySelectorAll(".dshp-hint")).map(function (e) { return e.textContent }).join(" | ")')
+    ok(/本地音乐/.test(String(paneHints)), '音乐页里出现了「本地音乐」那一栏的标题', String(paneHints).slice(0, 220))
+    ok(/本地音乐 · \d+ 首/.test(String(paneHints)), '写明本地歌单有几首', String(paneHints).slice(0, 220))
+    // 真点一次本地播放：<audio> 的 src 应当指向 music-file?id=… 且真的开始播。
+    // 点之前必须确认"按钮真的在视口里"——音乐页东西多，按钮可能被排到面板外，
+    // 那时鼠标事件落在别的元素上（实测踩过：点了没反应，以为是逻辑坏了）。
+    let playing = null
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const info = await evaluate(`(() => {
+        const bs = Array.from(document.querySelectorAll('.dshp-chip'))
+        const b = bs.find((x) => /本地播放/.test(x.textContent))
+        if (!b) return { found: false }
+        const r = b.getBoundingClientRect()
+        const x = r.x + r.width / 2
+        const y = r.y + r.height / 2
+        const top = document.elementFromPoint(x, y)
+        return {
+          found: true, x: x, y: y,
+          inViewport: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth,
+          rect: { top: Math.round(r.top), bottom: Math.round(r.bottom), h: Math.round(r.height) },
+          viewportH: innerHeight,
+          hitIsSelf: !!top && (top === b || b.contains(top)),
+          hitTag: top ? (top.className || top.tagName) : null,
+        }
+      })()`)
+      if (attempt === 0) console.log('  按钮定位：' + JSON.stringify(info))
+      if (!info || !info.found) break
+      if (!info.hitIsSelf) {
+        // 被挡/在滚动容器的可见区之外：先滚到中间再重新取坐标（elementFromPoint 会自证命中）
+        await evaluate(`(() => {
+          const bs = Array.from(document.querySelectorAll('.dshp-chip'))
+          const b = bs.find((x) => /本地播放/.test(x.textContent))
+          if (b && b.scrollIntoView) b.scrollIntoView({ block: 'center' })
+          return true
+        })()`)
+        await sleep(400)
+        const re = await evaluate(`(() => {
+          const bs = Array.from(document.querySelectorAll('.dshp-chip'))
+          const b = bs.find((x) => /本地播放/.test(x.textContent))
+          const r = b.getBoundingClientRect()
+          const x = r.x + r.width / 2, y = r.y + r.height / 2
+          const top = document.elementFromPoint(x, y)
+          return { x: x, y: y, hitIsSelf: !!top && (top === b || b.contains(top)) }
+        })()`)
+        if (attempt === 0 && re) console.log('  滚动后重取坐标：' + JSON.stringify(re))
+        if (re) { info.x = re.x; info.y = re.y }
+      }
+      await clickAt(info.x, info.y)
+      await sleep(1200)
+      playing = await evaluate(`(() => {
+        const a = window.dshwSongLocal.audio()
+        const st = window.dshwSongLocal.state()
+        return { hasAudio: !!a, src: a ? String(a.src) : '', paused: a ? a.paused : null, index: st.index, playing: st.playing, error: st.error || '' }
+      })()`)
+      if (playing && playing.hasAudio && playing.paused === false) break
+      // 鼠标没打中就滚动后再来一次
+      await evaluate('document.querySelectorAll(".dshp-panel").forEach(function (p) { p.scrollTop = p.scrollTop + 120 }); true')
+      await sleep(300)
+    }
+    console.log('  播放现场：' + JSON.stringify(playing))
+    ok(playing && playing.hasAudio === true && /music-file\?id=/.test(String(playing.src)),
+      '<audio> 指向音乐文件的 Range 接口', JSON.stringify(playing && playing.src))
+    ok(playing && playing.paused === false, '真点一次「本地播放」→ 真的开始播（paused=false）', JSON.stringify(playing))
+    const fileLocal = await shot(path.join(OUT_DIR, 'music-pane-local.png'))
+    console.log('  截图：' + fileLocal)
+    // 收尾：暂停，别在主人机器上留声音
+    await evaluate('window.dshwSongLocal.pause()')
+    const stopped = await evaluate('window.dshwSongLocal.audio() ? window.dshwSongLocal.audio().paused : null')
+    ok(stopped === true, '收尾：已暂停（不在主人机器上留声音）', String(stopped))
+  }
+
+  /**
+   * 可靠点击：先把元素滚进滚动容器的可见区，再用 elementFromPoint 自证命中，然后发真鼠标事件。
+   * 为什么必须这样：音乐页内容比容器的 258px 高，不滚的话按钮落在可见区之外 ——
+   * 鼠标事件会落到 BODY 上（实测：点了没反应，还以为是功能坏了）。
+   */
+  const clickElementByText = async (re) => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const info = await evaluate(`(() => {
+        const bs = Array.from(document.querySelectorAll('.dshp-chip, .dshp-btn'))
+        const b = bs.find((x) => ${re}.test(x.textContent))
+        if (!b) return { found: false }
+        if (b.scrollIntoView) b.scrollIntoView({ block: 'center' })
+        const r = b.getBoundingClientRect()
+        const x = r.x + r.width / 2, y = r.y + r.height / 2
+        const top = document.elementFromPoint(x, y)
+        return { found: true, x: x, y: y, hitIsSelf: !!top && (top === b || b.contains(top)), hitTag: top ? String(top.className || top.tagName).slice(0, 30) : null }
+      })()`)
+      if (!info || !info.found) return { found: false }
+      if (!info.hitIsSelf) { await sleep(350); continue }
+      await clickAt(info.x, info.y)
+      return { found: true, clicked: true, x: info.x, y: info.y }
+    }
+    return { found: true, clicked: false }
+  }
+
   console.log('\n--- 真点一次遥控按钮（toggle）---')
   const before = await evaluate('window.dshwSongSMTC.now()')
   const ctl = chips.find((c) => /播放·暂停/.test(c.label))
@@ -278,8 +388,8 @@ try {
       }
       return true
     })()`)
-    const btn = await evaluate(`(() => { const bs = Array.from(document.querySelectorAll('.dshp-chip')); const b = bs.find(x => /播放·暂停/.test(x.textContent)); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width/2, y: r.y + r.height/2 } })()`)
-    if (btn) await clickAt(btn.x, btn.y)
+    const clicked = await clickElementByText('/播放·暂停/')
+    console.log('  遥控按钮点击：' + JSON.stringify(clicked))
     await sleep(2500)
     const after = await evaluate('window.dshwSongSMTC.now()')
     const posts = await evaluate('JSON.stringify((window.__probeNet || []).filter(function (r) { return r.method === "POST" }))')
@@ -306,12 +416,28 @@ try {
       : ('状态没变 —— ' + (before && before.player) + ' 这次没接受外部控制（宿主侧确实回了 ok；' +
          '真机实测网易云通常能翻，浏览器会话常常不行）')))
 
-    // 复原：再点一次回到点击前的状态（不管刚才有没有真的翻转，都点回去，别留副作用）
-    if (btn) await clickAt(btn.x, btn.y)
-    await sleep(2000)
-    const restored = await evaluate('window.dshwSongSMTC.now()')
-    ok(!!restored && !!before && restored.playing === before.playing,
-      '再点一次回到点击前的状态（不留副作用）', JSON.stringify({ before: before && before.playing, restored: restored && restored.playing }))
+    // 复原：**只在真的翻转了**才需要点回去 —— 浏览器会话本来就不接受外部控制（状态没变），
+    // 再点一次反而是多余的（还可能因为 SMTC 状态回读慢造成假失败）。
+    // 真机实测：网易云的 pause 很稳，play 偶尔会有一两秒延迟，所以这里**重试两次**；
+    // 两次都没回来就照实报"可能还停在暂停"，不留假绿。
+    const flipped = (after && after.playing) !== (before && before.playing)
+    let restored = await evaluate('window.dshwSongSMTC.now()')
+    if (flipped) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (restored && before && restored.playing === before.playing) break
+        await clickElementByText('/播放·暂停/')
+        await sleep(2500)
+        restored = await evaluate('window.dshwSongSMTC.now()')
+      }
+    }
+    const backToBefore = !!restored && !!before && restored.playing === before.playing
+    if (flipped && !backToBefore) {
+      console.log('  ⚠️ 复原没成功：' + JSON.stringify({ before: before && before.playing, now: restored && restored.playing, player: before && before.player })
+        + '（这台播放器偶发不接受外部 play；请手动点一下播放）')
+    }
+    ok(flipped ? backToBefore : true,
+      flipped ? '再点一次回到点击前的状态（不留副作用）' : '没翻转时无需复原（状态保持原样）',
+      JSON.stringify({ flipped: flipped, before: before && before.playing, restored: restored && restored.playing }))
 
     if (LIVE_CONTROL) {
       console.log('\n--- --live-control：在真播放器上完整来回（反向命令 → 验证 → 复原）---')

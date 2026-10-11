@@ -721,6 +721,19 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
   border-radius:calc(9px * var(--dshp-ps));
   padding:calc(7px * var(--dshp-ps)) calc(9px * var(--dshp-ps));outline:none}
 .dshp-panel textarea:focus{border-color:var(--dshp-accent)}
+/* fork 增量：音乐页那个"音乐文件夹"输入框（本页唯一一个 input，跟着 textarea 的样式走） */
+.dshp-panel .dshp-input{flex:1;min-width:0;box-sizing:border-box;font:inherit;
+  color:inherit;background:transparent;border:1px solid var(--dshp-line);
+  border-radius:calc(9px * var(--dshp-ps));
+  padding:calc(5px * var(--dshp-ps)) calc(9px * var(--dshp-ps));outline:none}
+.dshp-panel .dshp-input:focus{border-color:var(--dshp-accent)}
+/* fork 增量：音乐页的"本地音乐"块自带小滚动条。
+   面板内容区只有 258px 高（上游把面板限在 300px），本地音乐一多就把"选文件夹"挤出可见区、
+   主人点不到（实测踩过）。给它自己的上限＋滚动，既看得全又保持遥控那排始终在最上面。 */
+.dshp-panel .dshp-box.dshp-local{max-height:150px;overflow-y:auto;overflow-x:hidden;
+  scrollbar-width:thin;padding-right:6px}
+.dshp-panel .dshp-box.dshp-local::-webkit-scrollbar{width:6px}
+.dshp-panel .dshp-box.dshp-local::-webkit-scrollbar-thumb{background:rgba(120,140,180,.45);border-radius:3px}
 .dshp-row{display:flex;gap:6px;align-items:center;margin-top:7px;flex-wrap:wrap}
 .dshp-grow{flex:1}
 .dshp-tabs{display:flex;gap:3px;margin-bottom:7px;border-bottom:1px solid var(--dshp-line);padding-bottom:6px}
@@ -3855,11 +3868,71 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       mGrid.append(mkMusic('⏮ 上一首', 'prev'), mkMusic('⏯ 播放·暂停', 'toggle'),
         mkMusic('⏭ 下一首', 'next'), mkMusic('🎵 打开挂件面板', 'open-panel'))
       mbox.appendChild(mGrid)
-      mbox.appendChild($('div', 'dshp-hint', (smtc
-        ? '遥控作用于当前生效的播放器（点上面的播放器可固定跟随；电台是直播流，没有上一首/下一首）'
-        : '遥控作用于挂件当前音源；电台是直播流，没有上一首/下一首')
+
+      // —— 本地音乐（宿主自己的 music.json / music-file，E1 从挂件搬来）——
+      // 与上面那排"遥控别人的播放器"是两条路：这里是我们自己在页面里播。
+      // ⚠️ 版面约束：面板的滚动容器只有约 258px 高，所以这一栏的东西必须**尽量少**，
+      // 否则"播放/选文件夹"会被挤出可见区（主人点不到，实测踩过）。
+      const local = (typeof window !== 'undefined' && window.dshwSongLocal) ? window.dshwSongLocal : null
+      if (local && typeof local.state === 'function') {
+        const st = local.state() || {}
+        const lb = $('div', 'dshp-box dshp-local')
+        if (!st.ok) {
+          lb.appendChild($('div', 'dshp-hint', '🎧 ' + (st.error || '读不到本地歌单')))
+        } else {
+          const tracks = st.tracks || []
+          const cur = st.index >= 0 ? tracks[st.index] : null
+          lb.appendChild($('div', 'dshp-hint', '🎧 本地音乐 · ' + tracks.length + ' 首'
+            + (cur ? (' · 在放 ' + (cur.title || cur.name)) : '')))
+          if (tracks.length) {
+            const trow = $('div', 'dshp-row')
+            const mkLocal = (label, fn) => {
+              const b = $('button', 'dshp-chip', label)
+              b.addEventListener('click', () => { try { fn() } catch (err) {} ; renderPane('music') })
+              return b
+            }
+            trow.append(
+              mkLocal('⏮ 本地', () => local.prev()),
+              mkLocal((st.playing ? '⏸ 暂停' : '▶ 本地播放'), () => local.toggle()),
+              mkLocal('⏭ 本地', () => local.next()),
+            )
+            lb.appendChild(trow)
+            // 只列前 4 首当快捷入口（其余靠上/下一首）；lb 自己有 max-height，塞多了可滚
+            const list = $('div', 'dshp-grid')
+            for (const t of tracks.slice(0, 4)) {
+              const on = cur && cur.id === t.id
+              const b = $('button', 'dshp-chip' + (on ? ' dshp-on' : ''), (on ? '● ' : '') + (t.title || t.name))
+              b.title = (t.name || '') + (t.inManaged ? '（托管目录）' : '（自定义目录）')
+              b.addEventListener('click', () => { local.playId(t.id); renderPane('music') })
+              list.appendChild(b)
+            }
+            lb.appendChild(list)
+          }
+          // 选文件夹：浏览器给不了原生目录选择器，所以这里收一个路径（和挂件同一种做法）
+          const drow = $('div', 'dshp-row')
+          const dinp = $('input', 'dshp-input')
+          dinp.type = 'text'
+          dinp.placeholder = '音乐文件夹，如 D:\\Music（留空＝她的托管目录）'
+          dinp.value = st.custom || ''
+          const dbtn = $('button', 'dshp-btn', '用这个文件夹')
+          dbtn.addEventListener('click', () => {
+            local.setDir(String(dinp.value || '').trim()).then((r) => {
+              try {
+                ui.bubble.show((r && r.ok) ? '歌单已切换' : ((r && r.error) || '这个文件夹用不了'), { name: 'DS 鲸鱼娘', ttl: 2400 })
+              } catch (err) {}
+              renderPane('music')
+            })
+          })
+          drow.append(dinp, dbtn)
+          lb.appendChild(drow)
+        }
+        mbox.appendChild(lb)
+      }
+
+      mbox.appendChild($('div', 'dshp-hint',
         // 版本戳：光看界面很难分清"新版没生效"还是"页面没刷新"，把版本号写在页面上最省事
-        + '\n音乐页 v' + ((smtc && typeof smtc.version === 'function') ? smtc.version() : '旧版 · 请刷新页面')))
+        'v' + ((smtc && typeof smtc.version === 'function') ? smtc.version() : '旧版 · 请刷新页面')
+          + ((typeof window !== 'undefined' && window.dshwSongLocal) ? ' · 本地音乐已接' : '')))
       panes.appendChild(mbox)
       return
     }
