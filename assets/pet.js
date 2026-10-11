@@ -4045,6 +4045,42 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     row0.appendChild(resetAll)
     box.append(hostRow, hostHint, themeRow, row0)
 
+    // —— 鲸歌（dsh-whale-song）增量 ②：简报分档 + 两个开关 ——
+    // 挂进她已有的「设置」页，样式沿用本页的 dshp-row / dshp-btn / dshp-primary / dshp-hint，
+    // 不改她既有控件；数值走 CFG（自动持久化）⇒ 关掉下次还在。
+    try {
+      const songTitle = $('div', 'dshp-hint', '鲸歌 · 简报与内心想法')
+      const briefRow = $('div', 'dshp-row')
+      const briefBtns = [['off', '不报'], ['stats', '只报一行'], ['full', '完整']].map(([v, label]) => {
+        const b = $('button', 'dshp-btn' + (CFG.songBriefing === v ? ' dshp-primary' : ''), label)
+        b.addEventListener('click', () => {
+          dshwSongPrefs({ briefing: v })
+          for (const [val, btn] of briefBtns) btn.classList.toggle('dshp-primary', val === v)
+        })
+        return [v, b]
+      })
+      briefRow.append(...briefBtns.map(([, b]) => b))
+      const briefHint = $('div', 'dshp-hint', '任务简报：上游会把整段回复正文塞进信封（看起来像碎片），默认只报一行')
+
+      const toggleRow = $('div', 'dshp-row')
+      const mkToggle = (label, key) => {
+        const b = $('button', 'dshp-btn' + (CFG[key] ? ' dshp-primary' : ''), '')
+        const paint = () => { b.textContent = label + '：' + (CFG[key] ? '开' : '关') }
+        b.addEventListener('click', () => {
+          CFG[key] = !CFG[key]
+          persistCfg()
+          b.classList.toggle('dshp-primary', !!CFG[key])
+          paint()
+        })
+        paint()
+        return b
+      }
+      toggleRow.append(mkToggle('显示工作简报', 'songShowReports'), mkToggle('显示内心想法', 'songInnerVoice'))
+      const toggleHint = $('div', 'dshp-hint', '内心想法＝自言自语/喊饿；单独关，不影响画质与帧率')
+
+      box.append(songTitle, briefRow, briefHint, toggleRow, toggleHint)
+    } catch (err) {}
+
     const row2 = $('div', 'dshp-row')
     const reset = $('button', 'dshp-btn', '回到角落')
     reset.addEventListener('click', () => {
