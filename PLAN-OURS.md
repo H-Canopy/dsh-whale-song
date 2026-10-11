@@ -73,6 +73,23 @@
   3. 新前端 `assets/media-smtc.js` + 「音乐」页签列出检测到的播放器（当前生效高亮、可固定跟随）；
      媒体桥四路回退；新增设置开关 `设置 → 读系统媒体`（默认开，关掉后零请求）。
   4. `sources/netease.mjs`：网易云点播搬成适配器（不改行为，接口换适配器形状）。
-  5. 测试：新增 `tools/test-media-route.mjs`（41/41，`--live` 打真机 8/8）、
-     `tools/test-media-smtc.mjs`（41/41）；扩写 `test-media-bridge.mjs`（24/24）、
-     `test-prefs.mjs`、`test-sources.mjs`。**尚未动**上游 `pet.js` 的既有逻辑（只在音乐页与设置页做加法）。
+  5. 测试：新增 `tools/test-media-route.mjs`（49/49，`--live` 打真机 50/50）、
+     `tools/test-media-smtc.mjs`（42/42）、`tools/test-music-pane.mjs`（24/24）；
+     扩写 `test-media-bridge.mjs`（24/24）、`test-prefs.mjs`、`test-sources.mjs`；
+     `tools/test-all.mjs` 一键跑全。
+  6. **桌面版注入**：桌面版只认 `webserver/index-inject`（tapIndex 到不了它的静态 dist），
+     两条通道现在共用 `INDEX_SCRIPTS_FILES` —— 少推一个就会出现"重启+刷新都没用、音乐页永远旧版"。
+
+- 2026-10-12（`0.4.6-song.2` 第二批）：**E1 宿主服务搬迁**（挂件退休的前置）——
+  1. 新增 `lib/media-services.mjs`（1876 行，原样搬自挂件）：`/dsh-whale/music.json`、
+     `music-file`（音频 Range/seek）、`radio.json`、`radio-search`、`radio-stream`
+     （SSRF 全谱防护 + `.pls`/`.m3u` 解引用 + 逐跳重查 + 跳数/并发/体积上限）。
+     状态文件仍是 `$DSH_HOME/.dshw-music.json` / `.dshw-radio.json`（与挂件共用 → 换插件不丢歌单）。
+  2. 栅栏**组合**：宿主的（DSH cookie / 桌面版通行证）+ 搬过来的（回环 Host / 跨站 / Origin 同源 /
+     写请求只许本机），两层都过才放行；且**由 media-services 自己套**，不外包给调用方。
+  3. 验收（外部 harness 原样打我们的插件）：`radio-harness` **52/52**、`music-harness` **41/43**。
+     未过两条是**挂件自己 UI 的既有路由**（`/dsh-whale/size.json`、`/dsh-whale/widget.js`）：
+     鲸歌音乐页用自己的客户端，不需要它们，所以不做假桩（宁可留白也不假装支持）。
+  4. 仓内新增 `tools/test-media-services.mjs`（17/17）锁"接线 + 栅栏"；`test-all` 现为 8 组全绿。
+  5. 生成器留在 `D:\Bigfish\_staging\gen-media-services.mjs`（不进仓库）：区域选取改动后可重跑，
+     但**重新生成会覆盖手工改动**，改生成物前先想清楚要不要回头改生成器。
