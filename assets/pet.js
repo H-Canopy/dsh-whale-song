@@ -4079,6 +4079,29 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       const toggleHint = $('div', 'dshp-hint', '内心想法＝自言自语/喊饿；单独关，不影响画质与帧率')
 
       box.append(songTitle, briefRow, briefHint, toggleRow, toggleHint)
+
+      // —— 鲸歌增量 ③：音乐遥控 ——
+      // 调挂件（dsh-whale-widget）暴露的 window.dshwMediaCtl，**作用于当前音源**
+      //（本地音乐 / 在线电台 / 网易云），所以这里不需要知道现在放的是哪一路。
+      // 注意在"点击时"才解析该函数：挂件可能比桌宠晚加载。
+      const callCtl = (cmd) => {
+        try { return (typeof window.dshwMediaCtl === 'function') ? window.dshwMediaCtl(cmd) : null } catch (err) { return null }
+      }
+      const musicTitle = $('div', 'dshp-hint', '鲸歌 · 音乐遥控')
+      const musicRow = $('div', 'dshp-row')
+      const mkMusic = (label, cmd) => {
+        const b = $('button', 'dshp-btn', label)
+        b.addEventListener('click', () => {
+          const r = callCtl(cmd)
+          const msg = (r && r.ok) ? (label + ' ✓') : ((r && r.error) || '挂件没装（或没在放），遥控不可用')
+          try { ui.bubble.show(msg, { name: 'DS 鲸鱼娘', ttl: 2200 }) } catch (err) {}
+        })
+        return b
+      }
+      musicRow.append(mkMusic('⏮ 上一首', 'prev'), mkMusic('⏯ 播放·暂停', 'toggle'),
+        mkMusic('⏭ 下一首', 'next'), mkMusic('📋 打开挂件面板', 'open-panel'))
+      const musicHint = $('div', 'dshp-hint', '遥控作用于挂件当前音源（本地音乐 / 在线电台 / 网易云）；电台是直播流，没有上下首')
+      box.append(musicTitle, musicRow, musicHint)
     } catch (err) {}
 
     const row2 = $('div', 'dshp-row')
