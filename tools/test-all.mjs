@@ -27,6 +27,7 @@ const SUITES = [
   ['花费额度提示', 'test-spend.mjs'],
   ['音源适配器', 'test-sources.mjs'],
   ['音乐 skill 文档', 'test-skill-music.mjs'],
+  ['单机模式（无后端）', 'test-standalone.mjs'],
 ]
 
 const results = []

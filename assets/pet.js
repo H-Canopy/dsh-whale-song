@@ -46,7 +46,12 @@
     BOOT.config || {},
   )
 
-  const BASE = '/dsh-pet'
+  // 后端基址。默认是宿主注入的 /dsh-pet；**独立静态页**（不跑 DSH，直接开文件/静态服务器）里
+  // 先用 window.__DSH_PET_BOOT__ / window.__DSH_PET_BASE__ 改掉它，否则模型都拉不到。
+  // 独立跑时服务端那些接口会 404 —— 前端本来就对这些请求失败做了兜底（桌宠照常渲染与互动）。
+  const BASE = (BOOT && typeof BOOT.base === 'string' && BOOT.base)
+    || (typeof window !== 'undefined' && typeof window.__DSH_PET_BASE__ === 'string' && window.__DSH_PET_BASE__)
+    || '/dsh-pet'
   const LS_KEY = 'dsh-live2d-pet:layout'
 
   /**

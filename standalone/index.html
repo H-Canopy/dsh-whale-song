@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DS 鲸鱼娘 · 单机预览（不连 DSH）</title>
+<!--
+  ============================================================================
+  standalone/index.html —— 不装 DSH、不跑服务器，直接打开这个文件就能看到她
+  ----------------------------------------------------------------------------
+  用法：直接双击本文件（file:// 也能跑）；它和 ../assets 必须在同一个仓库里。
+
+  为什么只需要一个文件：pet.js **自己**会按 BASE 去取 /vendor/pixi.min.js、
+  /vendor/cubism4.min.js、/vendor/live2dcubismcore.min.js 与 /model/manifest.json。
+  所以这里只做一件事：把 BASE 指到 ../assets（它下面正好同时有 model/ 与 vendor/）。
+
+  【这个模式能做什么】渲染、物理、眨眼、视线跟随、菜单（表情/装饰/场景/动作）、
+  点一下互动、待机自言自语、打瞌睡 —— 也就是"看脸"这一半。
+  【做不到什么】没有任何后端，所以：不跟 agent 联动（无事件流）、没有工作简报/信箱、
+  钱包是空的、音乐页没有播放器列表也读不到本地歌单、跟她说话送不进会话。
+  **搭配 DSH 才是完整版。**
+  ============================================================================
+-->
+<style>
+  html,body{margin:0;height:100%;background:#101a24;color:#cfe3f5;
+    font:14px/1.7 system-ui,"Segoe UI",sans-serif}
+  .wrap{max-width:780px;margin:0 auto;padding:26px 20px 60px}
+  h1{font-size:20px;margin:0 0 6px}
+  .sub{opacity:.8;margin:0 0 16px}
+  table{width:100%;border-collapse:collapse;margin:10px 0 18px;font-size:13px}
+  th,td{border:1px solid #24333f;padding:7px 9px;text-align:left;vertical-align:top}
+  th{background:#16222e;white-space:nowrap}
+  .yes{color:#7fe0a0}.no{color:#ffb4b4}
+  .cta{background:#16222e;border:1px solid #24333f;border-radius:10px;padding:12px 14px;margin:14px 0}
+  code{background:#0b131b;border:1px solid #223040;border-radius:5px;padding:1px 5px}
+  .hint{opacity:.65;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🐋 DS 鲸鱼娘 · 单机预览</h1>
+  <p class="sub">你现在看到的是<b>只有前端</b>的她：不连 DSH、没有后端，所以只有"看脸"这一半。</p>
+
+  <table>
+    <tr><th>能力</th><th>这个单机页面</th><th>搭配 DSH</th></tr>
+    <tr><td>模型渲染 / 物理 / 眨眼 / 视线跟随</td><td class="yes">✅</td><td class="yes">✅</td></tr>
+    <tr><td>菜单：表情 · 装饰 · 场景 · 动作</td><td class="yes">✅</td><td class="yes">✅</td></tr>
+    <tr><td>点她互动、待机自言自语、打瞌睡</td><td class="yes">✅</td><td class="yes">✅</td></tr>
+    <tr><td>跟着 agent 干活：思考 / 读文件 / 完成 / 报错的表情动作</td><td class="no">—</td><td class="yes">✅</td></tr>
+    <tr><td>头顶信箱（工作简报）、内心想法气泡</td><td class="no">—</td><td class="yes">✅</td></tr>
+    <tr><td>右键钱包（余额 / 本轮消耗 / 峰谷计价）</td><td class="no">—</td><td class="yes">✅</td></tr>
+    <tr><td>懂音乐：知道你在放什么（网易云/QQ音乐/PotPlayer/浏览器…）</td><td class="no">—</td><td class="yes">✅</td></tr>
+    <tr><td>音乐页：播放器列表 · 上下首 · 本地音乐 · 点歌</td><td class="no">—</td><td class="yes">✅</td></tr>
+    <tr><td>跟她说话（把话送进会话）</td><td class="no">—</td><td class="yes">✅</td></tr>
+  </table>
+
+  <div class="cta">
+    <b>想让她真的干活？</b><br>
+    装进 DeepSeek Harness 就是完整版（跟着 agent 联动 + 懂音乐 + 能点歌）：<br>
+    <code>dsh plugin --profile web add github:H-Canopy/dsh-whale-song</code>
+    <div class="hint">装完重启一次 DSH，右下角就会出现她；这一页可以关掉了。</div>
+  </div>
+
+  <p class="hint">
+    许可：代码 MIT（上游 © Andersen216 / 增量 © H-Canopy）；角色形象 © 上善无形 · ZipZipPipe，
+    Live2D 模型 © 氵六青 —— <b>CC BY-NC-SA 4.0，非商业</b>。本项目完全免费、不商业化。
+  </p>
+</div>
+
+<script>
+  // 把后端基址指到 ../assets：pet.js 会在它下面找 model/ 与 vendor/，
+  // 而这两个目录正好都在 assets/ 里；宿主接口（/events、/hud…）在这个模式下会 404，
+  // 前端对这些失败本来就有兜底，所以她照常渲染与互动。
+  (function () {
+    var base = new URL('../assets/', location.href).href
+    window.__DSH_PET_BASE__ = base
+    window.__DSH_PET_BOOT__ = { config: { enabled: true }, base: base, standalone: true }
+  })()
+</script>
+<!-- 只加载她本体；vendor 三件套由 pet.js 自己按 BASE 去取（见文件头注释） -->
+<script src="../assets/pet.js"></script>
+</body>
+</html>
