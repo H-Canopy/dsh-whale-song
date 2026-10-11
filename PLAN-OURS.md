@@ -118,5 +118,7 @@
   3. 新增 `tools/test-skill-music.mjs`（13/13）：把文档里写的 CLI 子命令拿去和真 CLI 的 `--help`
      对账、把文档里写的宿主路由拿去和真插件注册的路由对账 —— 防"文档悄悄过期、agent 照错的做"。
      `test-all` 现为 **10 组全绿**。
-  4. **还没装进 DSH**：本机没有 `~/.dsh/skills/`，这两份 skill 目前不在 agent 能看到的目录里
-     （要生效得按插件 README 的说法装到 `~/.dsh/skills/`）。
+  4. **skill 已装进 DSH 并当场验证**：本机原先没有 `~/.dsh/skills/`。做法是先放一个探测 skill，
+     确认 DSH **实时扫描**该目录（技能目录当场就更新了）后，把 `SKILL.md`（含新的音乐第七节）与
+     `whale-song-music.md` 一起装到 `~/.dsh/skills/dsh-whale-girl-live2d/`，再删掉探测 skill。
+     结论：**以后要加/改"agent 该知道的事"，写进这个目录就生效，不用重启**。
