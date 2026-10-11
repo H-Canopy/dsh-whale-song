@@ -13,6 +13,11 @@
 // 【隐私/打扰】默认开，但**不主动改任何播放状态**：只有你点音乐页的按钮才会发 POST。
 // 设置里可整块关掉（CFG.songSystemMedia = false ⇒ 一次请求都不发）。
 //
+// 【凭据】宿主的路由都过 DSH 的信任栅栏（认 DSH 的会话 cookie，或桌面版的通行证 cookie），
+// 所以这几个 fetch **不能**写 credentials:'omit' —— 那等于每次都不带票，栅栏一律 401，
+// 结果就是"检测到 0 个播放器"。用默认的 same-origin（同源带 cookie）就对了。
+// 这不是跨站请求：全部指向当前页面的同源 /dsh-pet/*。
+//
 // 【调试】window.dshwSongSMTC.now()      立刻读一次（返回 null = 没有/没开/读不到）
 //          window.dshwSongSMTC.players() 列出所有媒体会话
 //          window.dshwSongSMTC.pick(app) 固定跟随某个播放器（'' = 跟随系统自动）
@@ -84,7 +89,8 @@
     return v
   }
 
-  var cache = null   // { at, players, current }
+  var cache = null     // { at, players, current }
+  var inflight = null  // 正在进行的读（多处同时调用只发一次请求）
 
   function normPlayer(row) {
     var st = String((row && row.status) || '')
@@ -121,14 +127,18 @@
     return new Promise(function (resolve) {
       if (!enabled()) { resolve(null); return }
       if (!force && cache && (Date.now() - cache.at) < TTL_MS) { resolve(cache); return }
-      var p = apiFetch(ROUTE + '?list=1', { credentials: 'omit' })
+      // 已经有一次在飞就别再发一条：页面刚加载时"轮询 + 音乐页 + 媒体桥"可能同时问
+      if (inflight) { inflight.then(resolve); return }
+      // 同源请求，**必须**带 cookie（信任栅栏认 DSH 会话 / 桌面版通行证）
+      var p = apiFetch(ROUTE + '?list=1', { credentials: 'same-origin' })
       if (!p || typeof p.then !== 'function') { resolve(null); return }
-      p.then(function (r) { return r && r.ok ? r.json() : null })
+      inflight = p.then(function (r) { return r && r.ok ? r.json() : null })
         .then(function (d) {
-          if (!d || !d.ok || !d.sessions) { resolve(cache); return }
-          resolve(apply(d.sessions.map(normPlayer)))
+          if (!d || !d.ok || !d.sessions) return cache
+          return apply(d.sessions.map(normPlayer))
         })
-        .catch(function () { resolve(cache) })
+        .catch(function () { return cache })
+      inflight.then(function (v) { inflight = null; resolve(v) })
     })
   }
 
@@ -138,7 +148,7 @@
    */
   function now() {
     if (!enabled()) return null
-    if (!cache) { load(); return null }   // 还没读到：先发一次请求，本次先安静
+    if (!cache) return null          // 首次读由下面的预取负责，本次先安静
     if ((Date.now() - cache.at) > 6000) load()   // 后台续上，避免停顿太久
     var c = cache.current
     if (!c || !c.title) return null
@@ -163,7 +173,7 @@
     if (pin) body.app = pin
     var p = apiFetch(ROUTE, {
       method: 'POST',
-      credentials: 'omit',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
@@ -184,6 +194,7 @@
     picked: picked,
     control: control,
     load: load,
+    ready: function () { return !!cache },
     tick: tick,
     prettyName: prettyName,
     enabled: enabled,
@@ -192,5 +203,6 @@
   try {
     if (!window.dshwSongSMTCTimer) window.dshwSongSMTCTimer = setInterval(tick, POLL_MS)
   } catch (err) {}
-  try { setTimeout(tick, 2000) } catch (err) {}
+  // 立刻先读一次（不等轮询那 3 秒）：音乐页刚打开时"检测到 0 个播放器"会让人以为坏了
+  try { load(true) } catch (err) {}
 })()

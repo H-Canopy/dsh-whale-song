@@ -6,3 +6,5 @@ node_modules/
 /test-output/
 backups/
 dist/
+# 探针截图：music-pane.png 是稳定的证据（已跟踪）；after 那张只是同一次运行的副本，别来回改
+/docs/probe/music-pane-after.png

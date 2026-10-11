@@ -274,6 +274,11 @@ console.log('\n--- POST：toggle 的翻译与缓存作废 ---')
   const r3 = await call('GET', '/dsh-pet/media?app=stub-toggle-2', undefined)
   ok(stubCalls().length === 1 && r3.json.nowPlaying.status === 'Paused',
     '控制后读缓存被作废（下一次 GET 真的重新读，拿到新状态）', 'calls=' + stubCalls().length + ' status=' + (r3.json.nowPlaying && r3.json.nowPlaying.status))
+  // 列表缓存也要一起作废：音乐页点完按钮会立刻重画"当前生效播放器"，列表若还缓存着旧状态就会闪旧值
+  await call('POST', '/dsh-pet/media', { cmd: 'play' })
+  clearStubCalls()
+  await call('GET', '/dsh-pet/media?list=1', undefined)
+  ok(stubCalls().length === 1, '控制后**列表**缓存也被作废（音乐页读的是列表）', 'calls=' + stubCalls().length)
   stub.status = 'Paused'
 }
 

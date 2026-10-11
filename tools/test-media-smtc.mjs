@@ -75,10 +75,11 @@ console.log('\n--- 启动与静默 ---')
   const env = makeEnv({ sessions: [] })
   ok(!!env.api && typeof env.api.now === 'function', '挂上了 window.dshwSongSMTC', String(!!env.api))
   ok(env.timers.intervals === 1, '启动了一个轮询定时器', 'intervals=' + env.timers.intervals)
-  ok(env.timers.timeouts >= 1, '安排了一次首帧刷新', 'timeouts=' + env.timers.timeouts)
+  ok(listCalls(env.calls).length >= 1, '启动时立刻读一次（不等轮询那 3 秒）', JSON.stringify(env.calls.map((c) => c.url)))
   ok(env.api.now() === null, '还没读到就返回 null（不编状态）')
   await flush()
   ok(listCalls(env.calls).length >= 1, '后台会去读会话列表', JSON.stringify(env.calls.map((c) => c.url)))
+  ok(env.api.ready() === true, '读完有 ready() 标记（媒体桥据此决定要不要等）', String(env.api.ready()))
   ok(env.api.now() === null, '列表为空时仍然 null', JSON.stringify(env.api.players()))
 }
 

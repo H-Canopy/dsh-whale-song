@@ -41,13 +41,20 @@
     try { return window.dshwSongBridgeReports === true } catch (err) { return false }
   }
 
-  // ① 我们自己的统一层（系统媒体会话）：不依赖挂件，任何播放器都算
+  // ① 我们自己的统一层（系统媒体会话）：不依赖挂件，任何播放器都算。
+  // 冷启动时它手上还没有数据（回到 null）—— 那种情况下我们**不白等**：把它的读取挂上，
+  // 读到了立刻再 tick 一次，于是"打开页面时已经在放歌"也能在半秒内对上表情。
   function readSystem() {
     try {
       var api = window.dshwSongSMTC
       if (!api || typeof api.now !== 'function') return null
       var r = api.now()
-      return (r && r.ok) ? r : null
+      if (r && r.ok) return r
+      if (typeof api.ready === 'function' && !api.ready() && typeof api.load === 'function') {
+        var p = api.load()
+        if (p && typeof p.then === 'function') p.then(function () { try { tick() } catch (err) {} })
+      }
+      return null
     } catch (err) { return null }
   }
 
