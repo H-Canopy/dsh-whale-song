@@ -363,6 +363,15 @@ console.log('\n--- 桌面版注入通道（webserver/index-inject）---')
   // 每个注入片段都必须带"已存在就不插"的自检，并且 defer=true（顺序不阻塞页面）
   const frag = String((table[0] && table[0].text) || '')
   ok(frag.indexOf('querySelector') >= 0 && frag.indexOf('defer') >= 0, '注入片段自带去重自检 + defer', frag.slice(0, 120))
+  // 片段是要被浏览器 eval 的：转义写坏（引号/反斜杠）在这里就会炸，必须逐段验语法
+  let fragOk = true
+  let fragErr = ''
+  for (const row of table) {
+    const src = String((row && row.text) || '')
+    if (!src) continue
+    try { new Function(src) } catch (err) { fragOk = false; fragErr = String((err && err.message) || err) + ' :: ' + src.slice(0, 160) }
+  }
+  ok(fragOk, '每个注入片段都是合法 JS（浏览器 eval 不会炸）', fragErr)
 }
 
 console.log('\n--- 信任栅栏：route() 包装必须过一遍 ---')
