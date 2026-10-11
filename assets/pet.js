@@ -2788,8 +2788,17 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
           if (dshwSongLastRightAt && nowMs - dshwSongLastRightAt < 450) {
             dshwSongLastRightAt = 0
             if (hud.open) closeHud()
+            // 先读切换前的状态，好把气泡写成"已暂停 / 继续播放"（含糊的"已切换"没法确认到底按没按上）
+            let before = null
+            try { before = (typeof window.dshwMediaNow === 'function') ? window.dshwMediaNow() : null } catch (err) { before = null }
             const r = (typeof window.dshwMediaCtl === 'function') ? window.dshwMediaCtl('toggle') : null
-            const msg = (r && r.ok) ? '音乐已切换 ✓' : ((r && r.error) || '挂件没装，遥控不可用')
+            let msg
+            if (r && r.ok) {
+              const tail = (before && before.ok && before.title) ? '：' + before.title : ''
+              msg = (before && before.ok) ? ((before.playing ? '已暂停 ⏸' : '继续播放 ▶') + tail) : '音乐已切换 ✓'
+            } else {
+              msg = (r && r.error) || '挂件没装，遥控不可用'
+            }
             try { ui.bubble.show(msg, { name: 'DS 鲸鱼娘', ttl: 2000 }) } catch (err) {}
             return
           }
