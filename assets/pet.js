@@ -4998,6 +4998,38 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
   // ui.bubble 是主流程里建的，所以再补两次（幂等：包过就跳过）
   try { setTimeout(dshwSongWrapBubble, 2000); setTimeout(dshwSongWrapBubble, 6000) } catch (err) {}
 
+  // —— 鲸歌增量 ⑥：花费额度提示 ——
+  // 累计消耗达到阈值就冒一次气泡，然后清零重新累计（循环）。
+  // 为什么按"额度"而不是常显 / 逐轮弹：她的钱包只在右键可见，逐轮弹又太吵；
+  // 按额度触发＝"花了钱才说话"，既不漏也不吵。数据用她 HUD 已有的每轮金额，不自己造第二套账。
+  // 开关与阈值都走 CFG（默认 开 / ¥0.5；也能用 dshwSongPrefs({spendThreshold: 1}) 改）。
+  try {
+    if (!('songSpendAlert' in CFG)) CFG.songSpendAlert = true
+    if (typeof CFG.songSpendThreshold !== 'number' || !(CFG.songSpendThreshold >= 0)) CFG.songSpendThreshold = 0.5
+  } catch (err) {}
+  let dshwSongSpendAcc = 0
+  let dshwSongSpendSeq = null
+  function dshwSongSpendTick() {
+    try {
+      if (!CFG.songSpendAlert) return
+      const th = Number(CFG.songSpendThreshold)
+      if (!(th > 0)) return
+      const t = hud && hud.turn
+      if (!t || typeof t.amount !== 'number') return
+      if (dshwSongSpendSeq === t.seq) return            // 同一轮只计一次
+      dshwSongSpendSeq = t.seq
+      dshwSongSpendAcc += Math.max(0, t.amount)
+      if (dshwSongSpendAcc + 1e-9 < th) return
+      const spent = dshwSongSpendAcc
+      dshwSongSpendAcc = 0                              // 达到额度 → 清零，重新累计
+      const cur = t.currency ? String(t.currency) : 'CNY'
+      const sym = (cur === 'USD') ? '$' : '¥'
+      const bal = (hud && typeof hud.balance === 'number') ? (' · 余额 ' + sym + Number(hud.balance).toFixed(2)) : ''
+      try { ui.bubble.show('这几轮花了 ' + sym + spent.toFixed(2) + bal, { name: 'DS 鲸鱼娘', ttl: 4200 }) } catch (err) {}
+    } catch (err) {}
+  }
+  try { setInterval(dshwSongSpendTick, 5000) } catch (err) {}
+
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', main)
   else main()
 })()
