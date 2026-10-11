@@ -29,9 +29,13 @@
   `orpheus://<base64>` 播放，不解码、不碰凭据、不绕会员判定）。以后加 QQ 音乐只是"再插一个文件"。
 
 验证：`test-media-route.mjs` 41/41（另 `--live` 打真机 SMTC 8/8）、`test-media-smtc.mjs` 41/41、
-`test-media-bridge.mjs` 24/24、`test-prefs.mjs` / `test-spend.mjs` / `test-sources.mjs` 全通过。
+`test-media-bridge.mjs` 24/24、`test-music-pane.mjs` 24/24、`test-prefs.mjs` / `test-spend.mjs` /
+`test-sources.mjs` 全通过 —— 一条命令：`node tools/test-all.mjs [--live]`。
 真机证据：`-List` 列出 3 个会话（cloudmusic.exe / MSEdge / …）；`-Cmd play` → 状态变 `Playing`
 → `-Cmd pause` → 状态回 `Paused`（曲目与最终状态与操作前一致）。
+
+> ⚠️ 装了本版要**重启 DSH**（宿主插件只在启动时加载）：`/dsh-pet/media` 与 `media-smtc.js`
+> 是新加的路由。只改前端脚本（`assets/`）时刷新页面即可。
 
 ## 0.4.6 — 2026-10-01
 

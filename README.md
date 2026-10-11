@@ -586,6 +586,11 @@ dsh-whale-girl-live2d/
 > 开发用：`node tools/preview-server.mjs` 打开 `http://127.0.0.1:5199` 可以不启动 DSH 就预览
 > （左上角三个按钮可以假装 agent 在干活）。
 
+> fork 增量的测试：`node tools/test-all.mjs`（一趟跑完宿主路由 / 统一层前端 / 媒体桥 / 音乐页签 /
+> 偏好 / 花费 / 音源适配器）；加 `--live` 会额外打**真机 SMTC**（只读，不动你的播放状态）。
+> 注意：**宿主插件只在 DSH 启动时加载** —— 改完 `lib/` 必须重启 DSH 才生效；
+> 只改 `assets/` 的前端脚本刷新页面即可（那两个文件是按 mtime 热读的）。
+
 ---
 
 ## 📜 许可与署名 / License & credits
