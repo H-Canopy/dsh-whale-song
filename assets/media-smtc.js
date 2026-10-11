@@ -29,6 +29,8 @@
   var ROUTE = '/dsh-pet/media'
   var POLL_MS = 3000
   var TTL_MS = 2000
+  // 版本戳：音乐页会显示它，用来一眼分清"新版没生效"和"页面没刷新"
+  var MODULE_VERSION = '0.4.6-song.2'
 
   function petPrefs() {
     try {
@@ -195,6 +197,7 @@
     control: control,
     load: load,
     ready: function () { return !!cache },
+    version: function () { return MODULE_VERSION },
     tick: tick,
     prettyName: prettyName,
     enabled: enabled,

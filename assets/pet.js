@@ -3855,9 +3855,11 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       mGrid.append(mkMusic('⏮ 上一首', 'prev'), mkMusic('⏯ 播放·暂停', 'toggle'),
         mkMusic('⏭ 下一首', 'next'), mkMusic('🎵 打开挂件面板', 'open-panel'))
       mbox.appendChild(mGrid)
-      mbox.appendChild($('div', 'dshp-hint', smtc
+      mbox.appendChild($('div', 'dshp-hint', (smtc
         ? '遥控作用于当前生效的播放器（点上面的播放器可固定跟随；电台是直播流，没有上一首/下一首）'
-        : '遥控作用于挂件当前音源；电台是直播流，没有上一首/下一首'))
+        : '遥控作用于挂件当前音源；电台是直播流，没有上一首/下一首')
+        // 版本戳：光看界面很难分清"新版没生效"还是"页面没刷新"，把版本号写在页面上最省事
+        + '\n音乐页 v' + ((smtc && typeof smtc.version === 'function') ? smtc.version() : '旧版 · 请刷新页面')))
       panes.appendChild(mbox)
       return
     }
