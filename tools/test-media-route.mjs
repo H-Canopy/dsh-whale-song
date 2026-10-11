@@ -332,6 +332,39 @@ console.log('\n--- 失败路径：助手吐非 JSON / 起不来 ---')
   stub.mode = 'ok'
 }
 
+console.log('\n--- 桌面版注入通道（webserver/index-inject）---')
+{
+  // 桌面版（官方 Electron App）的首页是静态 dist，tapIndex 到不了它，只能靠这条事件通道。
+  // 实测踩过：只在 tapIndex 里加了 media-smtc.js ⇒ 桌面版里它压根没加载 ⇒ 音乐页永远是旧版。
+  const routes3 = []
+  const handlers = {}
+  const ctx3 = makeCtx(routes3)
+  ctx3.on = (name, fn) => { (handlers[name] = handlers[name] || []).push(fn) }
+  plugin.apply(ctx3)
+  ok((handlers['webserver/index-inject'] || []).length === 1, '挂上了 webserver/index-inject 监听', String((handlers['webserver/index-inject'] || []).length))
+  const table = []
+  for (const fn of handlers['webserver/index-inject'] || []) fn(table)
+  const text = table.map((r) => String((r && r.text) || '') + String((r && r.src) || '')).join('\n')
+  ok(text.indexOf('/dsh-pet/pet.js') >= 0 && text.indexOf('/dsh-pet/media-smtc.js') >= 0 && text.indexOf('/dsh-pet/media-bridge.js') >= 0,
+    '三个脚本都进了注入表（含我们的两个增量）', JSON.stringify(table.map((r) => r.kind)))
+  // 再调一次不许重复注入（宿主可能反复广播）
+  const before = table.length
+  for (const fn of handlers['webserver/index-inject'] || []) fn(table)
+  ok(table.length === before, '重复广播不会重复注入（幂等）', before + ' → ' + table.length)
+  // 逐文件幂等：表里已有 pet.js 时**只有它**不重复，我们的两个增量照样补上
+  //（这正是桌面版要的行为：别的插件/旧版可能已经推过 pet.js）
+  const table2 = [{ kind: 'script-src', src: '/dsh-pet/pet.js' }]
+  for (const fn of handlers['webserver/index-inject'] || []) fn(table2)
+  const text2 = table2.map((r) => String((r && r.text) || '') + String((r && r.src) || '')).join('\n')
+  const petCount = (text2.match(/\/dsh-pet\/pet\.js/g) || []).length
+  ok(table2.length === 3 && petCount === 1, '表里已有 pet.js 时：不重复加它，但仍补上两个增量', table2.length + ' 条 / pet.js 出现 ' + petCount + ' 次')
+  ok(text2.indexOf('/dsh-pet/media-smtc.js') >= 0 && text2.indexOf('/dsh-pet/media-bridge.js') >= 0,
+    '补上的正是 media-smtc.js 与 media-bridge.js', JSON.stringify(table2.map((r) => r.kind)))
+  // 每个注入片段都必须带"已存在就不插"的自检，并且 defer=true（顺序不阻塞页面）
+  const frag = String((table[0] && table[0].text) || '')
+  ok(frag.indexOf('querySelector') >= 0 && frag.indexOf('defer') >= 0, '注入片段自带去重自检 + defer', frag.slice(0, 120))
+}
+
 console.log('\n--- 信任栅栏：route() 包装必须过一遍 ---')
 {
   const routes2 = []
