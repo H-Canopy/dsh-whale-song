@@ -15,12 +15,13 @@ import { fileURLToPath } from 'node:url'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const LIVE = process.argv.includes('--live')
 
-// 顺序：宿主路由 → 统一层前端 → 媒体桥 → 页签 → 偏好/花费 → 音源适配器
+// 顺序：宿主路由 → 统一层前端 → 媒体桥 → 页签 → 本地音乐/电台服务 → 偏好/花费 → 音源适配器
 const SUITES = [
   ['宿主路由 /dsh-pet/media', 'test-media-route.mjs'],
   ['统一层前端 media-smtc', 'test-media-smtc.mjs'],
   ['媒体桥 media-bridge', 'test-media-bridge.mjs'],
   ['「音乐」页签', 'test-music-pane.mjs'],
+  ['本地音乐/电台服务', 'test-media-services.mjs'],
   ['偏好与简报', 'test-prefs.mjs'],
   ['花费额度提示', 'test-spend.mjs'],
   ['音源适配器', 'test-sources.mjs'],
