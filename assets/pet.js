@@ -2781,6 +2781,20 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
         e.stopPropagation()
         // 主人要求：右键弹「余额 / 本轮消耗 / 峰谷」这个框，不再直接弹设置菜单
         // （设置还在工具栏的 ⋯ 里，没有丢）
+        // 【鲸歌增量 ⑤】右键**双击** = 播放/暂停（单击仍是钱包框，两种手势互不冲突）。
+        // 判据：两次右键间隔 < 450ms；第二下不再切换钱包框，改为遥控挂件当前音源。
+        try {
+          const nowMs = Date.now()
+          if (dshwSongLastRightAt && nowMs - dshwSongLastRightAt < 450) {
+            dshwSongLastRightAt = 0
+            if (hud.open) closeHud()
+            const r = (typeof window.dshwMediaCtl === 'function') ? window.dshwMediaCtl('toggle') : null
+            const msg = (r && r.ok) ? '音乐已切换 ✓' : ((r && r.error) || '挂件没装，遥控不可用')
+            try { ui.bubble.show(msg, { name: 'DS 鲸鱼娘', ttl: 2000 }) } catch (err) {}
+            return
+          }
+          dshwSongLastRightAt = nowMs
+        } catch (err) {}
         if (hud.open) closeHud()
         else openHud({ flash: true, refresh: true })
       },
@@ -4938,6 +4952,9 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
   }
   // 整体静音：包住 pushReport（连她自己的工作简报一起静音）
   var dshwSongOrigPushReport = pushReport
+  // 右键双击（=播放/暂停）的上一击时间戳；0 表示没有待配对的单击。
+  // 用 var 声明在这里也能被前面的 contextmenu 处理器读到（函数作用域内变量提升）。
+  var dshwSongLastRightAt = 0
   pushReport = function (title, body) {
     if (!CFG.songShowReports) return
     return dshwSongOrigPushReport(title, body)
