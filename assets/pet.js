@@ -4859,11 +4859,42 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
           d[i * 4 + 3] = 255
         }
         cx.putImageData(img, 0, 0)
+        // 实体的**紧包围盒**（按网格算，落到窗口 CSS 坐标）。
+        // 为什么要它：`w/h` 是**画布矩形**（她站的那整张桌子，四周还有留白），
+        // 而壳要的是「她本人在哪儿」——用画布矩形做成型会连带一圈空气一起裁进去，
+        // 死区白白变大。tight 只在有掩码时才有值，拿不到就退回画布矩形。
+        let tight = null
+        try {
+          let minx = mask.w
+          let miny = mask.h
+          let maxx = -1
+          let maxy = -1
+          for (let y = 0; y < mask.h; y++) {
+            for (let x = 0; x < mask.w; x++) {
+              if (!mask.grid[y * mask.w + x]) continue
+              if (x < minx) minx = x
+              if (x > maxx) maxx = x
+              if (y < miny) miny = y
+              if (y > maxy) maxy = y
+            }
+          }
+          if (maxx >= 0) {
+            const sx = r.width / mask.w
+            const sy = r.height / mask.h
+            tight = {
+              x: Math.round(r.left + minx * sx),
+              y: Math.round(r.top + miny * sy),
+              w: Math.max(1, Math.round((maxx + 1 - minx) * sx)),
+              h: Math.max(1, Math.round((maxy + 1 - miny) * sy)),
+            }
+          }
+        } catch (err) { tight = null }
         return {
           x: Math.round(r.left),
           y: Math.round(r.top),
           w: Math.round(r.width),
           h: Math.round(r.height),
+          tight: tight,
           gw: mask.w,
           gh: mask.h,
           bits: cv.toDataURL('image/png'),

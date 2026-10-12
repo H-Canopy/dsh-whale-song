@@ -50,14 +50,33 @@ function helperSource() {
     '  [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr o);',
     '  [DllImport("user32.dll")] public static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool redraw);',
     '  [DllImport("user32.dll")] public static extern int GetWindowRgn(IntPtr hWnd, IntPtr hRgn);',
+    '  [DllImport("gdi32.dll")] public static extern int GetRgnBox(IntPtr hrgn, ref RECT r);',
+    '  [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr ctx);',
+    '  [DllImport("user32.dll")] public static extern IntPtr GetThreadDpiAwarenessContext();',
+    '  [DllImport("user32.dll")] public static extern int GetAwarenessFromDpiAwarenessContext(IntPtr ctx);',
+    '  public struct RECT { public int Left, Top, Right, Bottom; }',
     '}',
     '\'@',
+    // DPI awareness: powershell.exe defaults to DPI-UNAWARE, and Windows then scales every
+    // coordinate it hands to SetWindowRgn by 1/1.5 on a 150% display. Measured:
+    // request (172,344) 240x209, pad 0 -> applied (140,242)-(272,355), i.e. exactly x0.667.
+    // With awareness claimed first the region is 1:1 (measured: (100,100)-(200,200) in and out).
+    // Keep this ASCII-only: powershell.exe(5.1) reads a BOM-less UTF-8 file as ANSI and
+    // non-ASCII bytes eat quotes (hit twice). DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4.
+    '$aware = $false',
+    'try { $aware = [WShape]::SetProcessDpiAwarenessContext([IntPtr](-4)) } catch { $aware = $false }',
+    'if (-not $aware) { try { $aware = [WShape]::SetProcessDpiAwarenessContext([IntPtr](-3)) } catch { $aware = $false } }',
+    '$awLevel = -1',
+    'try { $awLevel = [WShape]::GetAwarenessFromDpiAwarenessContext([WShape]::GetThreadDpiAwarenessContext()) } catch { $awLevel = -2 }',
     '$bmp = [System.Drawing.Bitmap]::FromFile($png)',
     'try {',
     '  $master = [WShape]::CreateRectRgn(0, 0, 0, 0)',
     '  $rects = 0',
     '  $sx = $rw / $gw',
     '  $sy = $rh / $gh',
+    '  # Diagnostics only: dump the params we actually received, the PNG size, and the',
+    '  # region bbox we built vs the one read back. Pair with _staging/probe-rgn-exact.ps1.',
+    '  $minx = [int]::MaxValue; $miny = [int]::MaxValue; $maxx = [int]::MinValue; $maxy = [int]::MinValue',
     '  for ($gy = 0; $gy -lt $gh; $gy++) {',
     '    $gx = 0',
     '    while ($gx -lt $gw) {',
@@ -71,6 +90,8 @@ function helperSource() {
     '        $y1 = [int][math]::Round($ry + ($gy + 1) * $sy) + $pad',
     '        if ($x1 -le $x0) { $x1 = $x0 + 1 }',
     '        if ($y1 -le $y0) { $y1 = $y0 + 1 }',
+    '        if ($x0 -lt $minx) { $minx = $x0 }; if ($y0 -lt $miny) { $miny = $y0 }',
+    '        if ($x1 -gt $maxx) { $maxx = $x1 }; if ($y1 -gt $maxy) { $maxy = $y1 }',
     '        $r = [WShape]::CreateRectRgn($x0, $y0, $x1, $y1)',
     '        [void][WShape]::CombineRgn($master, $master, $r, 2)',
     '        [void][WShape]::DeleteObject($r)',
@@ -82,8 +103,10 @@ function helperSource() {
     '  if ($res -eq 0) { [void][WShape]::DeleteObject($master); Write-Output ("ERR set-window-rgn-failed rects=" + $rects); exit 1 }',
     '  $probe = [WShape]::CreateRectRgn(0,0,1,1)',
     '  $gr = [WShape]::GetWindowRgn([IntPtr]$hwnd, $probe)',
+    '  $pbox = New-Object WShape+RECT',
+    '  try { $pr = [WShape]::GetRgnBox($probe, [ref]$pbox) } catch { $pr = -1 }',
     '  [void][WShape]::DeleteObject($probe)',
-    '  Write-Output ("OK rects=" + $rects + " regionType=" + $gr)',
+    '  Write-Output ("OK rects=" + $rects + " regionType=" + $gr + " aware=" + $aware + "/" + $awLevel + " args=hwnd" + $hwnd + ",gw" + $gw + ",gh" + $gh + ",rx" + $rx + ",ry" + $ry + ",rw" + $rw + ",rh" + $rh + ",pad" + $pad + " png=" + $bmp.Width + "x" + $bmp.Height + " built=(" + $minx + "," + $miny + ")-(" + $maxx + "," + $maxy + ")" + " got=(" + $pbox.Left + "," + $pbox.Top + ")-(" + $pbox.Right + "," + $pbox.Bottom + ")")',
     '} finally { $bmp.Dispose() }',
   ].join('\n') + '\n'
 }
@@ -105,13 +128,33 @@ function writeMaskPng(dataUrl, dir) {
  * @param {() => (number|null)} opts.getHwnd 取窗口 HWND（Electron: win.getNativeWindowHandle()）
  * @param {number} [opts.expand] 掩码向外膨胀的像素（阴影/光晕不该被切掉时用；默认 0）
  * @param {(msg:string)=>void} [opts.log] 日志
+ *
+ * 提交的形状（来自页面 `DSHPet.maskInfo()`）：
+ *   x/y/w/h —— 画布（stage）矩形，CSS 像素；四周含留白
+ *   tight   —— **实体紧包围盒**，CSS 像素；有它就用它（区域更贴合她本人），没有就退回画布矩形
+ *   gw/gh + bits —— 网格尺寸 + 掩码 PNG
+ * ⚠️ 这些坐标与 SetWindowRgn 的坐标是 **1:1**，不要乘任何缩放：
+ *    辅助进程自己声明 DPI 感知（见 helperSource），系统不会再加缩放。
+ *    标定见 applyOnce 里的说明与 _staging/probe-rgn-cal-aware.ps1。
  */
 export function createShaper(opts) {
   const o = opts || {}
   const getHwnd = o.getHwnd
-  /** 窗口所在显示器的缩放（CSS→物理像素）。不给就按 1（不缩放）。 */
+  /**
+   * 窗口所在显示器的缩放（CSS/DIP → 物理像素）。默认 1。
+   *
+   * ⚠️ 这个换算**必须做**，而且只有在辅助进程声明了 DPI 感知之后才有意义：
+   *    · Electron 的 `getBounds()`/`getContentSize()` 与页面 `innerWidth` 都是 **DIP/CSS**：
+   *      实测 422x602、dpr=1.5；
+   *    · 但 Win32 `GetWindowRect` 与 `SetWindowRgn` 是 **物理像素**：同一窗口实测 632x902（=422x602 × 1.5）。
+   *    所以页面给的 CSS 矩形要 **× scale** 才能落到正确的物理位置。
+   *
+   *    历史：这条换算以前也写过，但当时辅助进程是 DPI-unaware，Windows 会把它的坐标**再乘 1/1.5**，
+   *    于是 ×1.5 又被抵消掉 0.667，区域整体跑偏 —— 看起来像"乘错了方向"。
+   *    现在辅助进程自己声明 DPI 感知（见 helperSource），1.5 才真正生效。
+   */
   const getScale = typeof o.getScale === 'function' ? o.getScale : () => 1
-  /** 轮廓向外**膨胀**的 DIP 数（阴影/光晕/姿势漂移的余量）。注意：是膨胀，不是把矩形拉大——后者会把轮廓拉伸变形。 */
+  /** 轮廓向外**膨胀**的像素数（阴影/光晕/姿势漂移的余量）。注意：是膨胀，不是把矩形拉大——后者会把轮廓拉伸变形。 */
   const expand = Number.isFinite(o.expand) ? o.expand : 0
   /** 两次「应用」之间至少隔多久（每次都要起一个 PowerShell，她一直在动，不限频会吃满 CPU） */
   const minGapMs = Number.isFinite(o.minGapMs) ? o.minGapMs : 500
@@ -154,19 +197,34 @@ export function createShaper(opts) {
       } catch (err) {}
       const hwnd = getHwnd()
       if (!hwnd) { resolve({ ok: false, error: 'no-hwnd' }); return }
-      // ⚠️ 单位换算（实测）：页面给的是 **CSS 像素 = DIP**（窗口 422×602 DIP ↔ innerWidth 422），
-      //    而 SetWindowRgn 收的是**物理像素**（同一台机器 150% 缩放，实测区域正好被缩了 1/1.5）。
-      //    所以要乘显示器的 scaleFactor。getScale() 由壳提供（按窗口所在显示器取）。
-      let k = 1
-      try { k = Number(getScale()) || 1 } catch (err) { k = 1 }
-      if (!(k > 0)) k = 1
+      // ⚠️ 单位：页面给的是 **CSS/DIP**，SetWindowRgn 收 **物理像素** → 乘 scale。
+      //    （Electron getBounds/getContentSize/innerWidth 都是 422x602 DIP；
+      //      而 Win32 GetWindowRect 实测 632x902 = 422x602 × 1.5。）
+      //    这个 ×scale 只有在辅助进程声明了 DPI 感知之后才正确 —— 否则系统会把它的坐标
+      //    再乘 1/1.5，把这里乘上去的 1.5 抵消掉，区域整体偏移（老 bug 的真面目，已修）。
+      let sc = 1
+      try { sc = Number(getScale()) || 1 } catch (err) { sc = 1 }
+      if (!(sc > 0)) sc = 1
+      const S = (n) => Math.round(n * sc)
+      const padv = Math.round(expand * sc)
+      // 用**紧包围盒**（她本人的像素范围）而不是画布矩形：画布四周有留白，
+      // 拿画布做区域会连空气一起裁进去，死区白白变大。拿不到 tight 就退回画布矩形。
+      const box = shape.tight && shape.tight.w > 0 && shape.tight.h > 0
+        ? { x: shape.tight.x, y: shape.tight.y, w: shape.tight.w, h: shape.tight.h, src: 'tight' }
+        : { x: shape.x, y: shape.y, w: shape.w, h: shape.h, src: 'canvas' }
+      // 最终传给辅助进程的四元组（**物理像素**，辅助进程现在 1:1 使用）
+      const finalRect = {
+        x0: S(box.x) - padv,
+        y0: S(box.y) - padv,
+        x1: S(box.x) + S(box.w) + padv,
+        y1: S(box.y) + S(box.h) + padv,
+      }
       const args = [
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', psFile,
         String(hwnd), String(shape.gw), String(shape.gh),
-        String(Math.round(shape.x * k)), String(Math.round(shape.y * k)),
-        String(Math.round(shape.w * k)), String(Math.round(shape.h * k)),
+        String(S(box.x)), String(S(box.y)), String(S(box.w)), String(S(box.h)),
         png,
-        String(Math.round(expand * k)),
+        String(padv),
       ]
       let child
       try {
@@ -185,7 +243,7 @@ export function createShaper(opts) {
       child.on('error', (e) => settle({ ok: false, error: 'spawn-failed: ' + String(e && e.message) }))
       child.on('close', (code) => {
         const line = String(out).trim().split(/\r?\n/).filter(Boolean).pop() || ''
-        if (code === 0 && /^OK /.test(line)) settle({ ok: true, detail: line + ' | mask=' + JSON.stringify(maskBbox) + ' | in=' + JSON.stringify({ hwnd: hwnd, gw: shape.gw, gh: shape.gh, x: Math.round(shape.x), y: Math.round(shape.y), w: Math.round(shape.w), h: Math.round(shape.h), pad: expand }) })
+        if (code === 0 && /^OK /.test(line)) settle({ ok: true, detail: line + ' | mask=' + JSON.stringify(maskBbox) + ' | in=' + JSON.stringify({ hwnd: hwnd, gw: shape.gw, gh: shape.gh, x: Math.round(shape.x), y: Math.round(shape.y), w: Math.round(shape.w), h: Math.round(shape.h), pad: expand }) + ' | box=' + box.src + ' final=' + JSON.stringify(finalRect) })
         else settle({ ok: false, error: line || ('exit ' + code), diag: String(errOut).slice(-300) })
       })
     })

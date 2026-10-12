@@ -208,6 +208,25 @@ function createMain() {
     const OFFSET = 12
     win.setPosition(wa.x + wa.width - WIN_W - OFFSET, wa.y + wa.height - WIN_H - OFFSET)
 
+  // ⚠️ 单位定案诊断（配合 D:\Bigfish\_staging\probe-rgn-exact.ps1 用，定案后可以删）：
+  //    「窗口 422x602」到底是 CSS 还是物理像素，决定了成型区域的换算系数、也决定了方案 B 的尺寸预算。
+  //    getContentSize() 给 DIP/CSS，Win32 GetWindowRect 给物理像素：两者相等就是 1:1，
+  //    差 1.5 倍就必须做换算（不然区域会整体错位/缩放）。
+  win.webContents.once("did-finish-load", async () => {
+    try {
+      const b = win.getBounds()
+      const cs = win.getContentSize()
+      const d = screen.getPrimaryDisplay()
+      // 页面侧的 ground truth：innerWidth/innerHeight 是 **CSS**，devicePixelRatio 是缩放。
+      // 只有它跟 getContentSize 一比，才能分清"422x602"是 CSS 还是物理像素。
+      let page = "?"
+      try {
+        page = await win.webContents.executeJavaScript("JSON.stringify({iw:innerWidth,ih:innerHeight,dpr:devicePixelRatio})")
+      } catch (err) { page = "EXC " + String(err && err.message) }
+      bootLog("单位定案: getBounds=" + b.width + "x" + b.height + " getContentSize=" + cs[0] + "x" + cs[1] + " workArea=" + d.workArea.width + "x" + d.workArea.height + " scaleFactor=" + d.scaleFactor + " page=" + page)
+    } catch (err) { bootLog("单位定案失败: " + String(err && err.message)) }
+  })
+
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
@@ -520,11 +539,14 @@ async function startLocalServer() {
           return buf.length >= 8 ? Number(buf.readBigUInt64LE(0)) : Number(buf.readUInt32LE(0))
         } catch (err) { return null }
       },
-      // 轮廓向外**膨胀**的 DIP 数（阴影/光晕/姿势漂移的余量）。
+      // 轮廓向外**膨胀**的像素数（阴影/光晕/姿势漂移的余量）。
       // 6→24：现在是真正的「轮廓膨胀」（原来是把矩形拉大，轮廓会被拉伸变形，本身也是偏移来源）。
       expand: 24,
-      // 关键单位换算（实测）：页面给的是 CSS 像素 = DIP，而 SetWindowRgn 收**物理像素**。
-      // 150% 缩放时不做这步，区域会小 1/1.5 倍并被推到窗口外（实测区域 = 期望 × 0.667）。
+      // 关键单位换算：页面给的是 **CSS/DIP**（getBounds/getContentSize/innerWidth 都是 422x602），
+      // 而 Win32 SetWindowRgn 收的是**物理像素**（同一窗口 GetWindowRect 实测 632x902 = ×1.5）。
+      // 所以区域必须 ×scaleFactor。⚠️ 这个换算只有在辅助进程声明 DPI 感知后才成立：
+      // 辅助进程以前是 DPI-unaware，系统会把它设的坐标再乘 1/1.5，正好把 ×1.5 抵消掉，
+      // 区域整体跑偏（表现为「只裁到她一部分」）—— 那才是老 bug 的真面目。
       getScale: () => {
         try {
           const b = win.getBounds()

@@ -142,18 +142,36 @@ ok(src.every((b) => b < 128), '.ps1 纯 ASCII（PS 5.1 读无 BOM UTF-8 会吃�
 const txt = src.toString('latin1')
 ok(/\$pad = \[int\]\$args\[8\]/.test(txt) && /- \$pad/.test(txt) && /\+ \$pad/.test(txt), '脚本里有 pad 并对每个矩形做四向膨胀')
 ok(txt.indexOf('param(') === -1, '脚本里没有 param()（放后面会报 ExpectedExpression）')
+// 这条是「她只被裁到一部分」那个真 bug 的守门员，别删：
+// powershell.exe 默认 DPI-unaware，Windows 会把它交给 SetWindowRgn 的坐标再乘 1/1.5
+// （实测请求 (172,344) 240x209 pad0 → 实得 (140,242)-(272,355)，正好 ×0.667）。
+// 必须由脚本自己先声明 DPI 感知，区域才是 1:1。
+ok(/SetProcessDpiAwarenessContext/.test(txt) && /\[IntPtr\]\(-4\)/.test(txt),
+  '辅助脚本先声明 DPI 感知（否则区域被系统再乘 1/1.5 → 只裁到她一部分）')
 
 console.log('\n--- 页面侧（源码守门员） ---')
 const petSrc = fs.readFileSync(path.join(HERE, '..', 'assets', 'pet.js'), 'utf8')
 const uiSrc = fs.readFileSync(path.join(HERE, '..', 'desktop', 'standalone', 'ui', 'index.html'), 'utf8')
+const shellSrc = fs.readFileSync(path.join(HERE, '..', 'desktop', 'standalone', 'main.js'), 'utf8')
+const shaperSrc = fs.readFileSync(path.join(HERE, '..', 'desktop', 'standalone', 'window-shape.mjs'), 'utf8')
 ok(/const SHELL_MASK_LIVE = !!window\.__DSHPET_SHELL__/.test(petSrc) && /MASK_REFRESH_MS/.test(petSrc), 'pet.js：壳模式下周期性重采掩码（否则掩码是一张定格快照）')
 ok(/SHELL_MASK_LIVE && !mask\.dirty && !mask\.building && performance\.now\(\) - mask\.lastBuild > MASK_REFRESH_MS/.test(petSrc), 'pet.js：postrender 里按间隔把掩码标脏', '')
 ok(/m\.bits\.length, hash\]/.test(uiSrc), 'ui/index.html：提交去重的 key 带掩码内容哈希（不只看 bits.length）')
+// maskInfo 必须给出**实体紧包围盒**（tight）：壳拿它做区域才贴她本人。
+// 只给画布矩形（含四周留白）会把一圈空气也裁成"可点"，死区白白变大。
+ok(/tight:\s*tight/.test(petSrc) && /const sx = r\.width \/ mask\.w/.test(petSrc),
+  'pet.js：maskInfo() 给出实体的 tight 紧包围盒（CSS 像素）')
+ok(/shape\.tight && shape\.tight\.w > 0/.test(shaperSrc), 'window-shape：有 tight 就用 tight，没有才退回画布矩形')
+// 区域是物理像素、页面给的是 CSS/DIP → 必须 ×scaleFactor（实测窗口 422x602 DIP = 632x902 物理）。
+ok(/getScale: \(\) => \{/.test(shellSrc) && /scaleFactor/.test(shellSrc),
+  'main.js：把显示器 scaleFactor 交给成型器（CSS → 物理像素）')
+ok(/const S = \(n\) => Math\.round\(n \* sc\)/.test(shaperSrc),
+  'window-shape：区域坐标按 scale 换算成物理像素')
 
 console.log('\n--- 尺寸稳定性（真机教训） ---')
 // 真机：窗口尺寸在多次拖动间累积增长（50 次 422→440）。实测 4 组对照后确定：
 // 拖动位置量化到**偶数**才不涨（量化到 1.5 的倍数仍涨 2px；只用 setPosition 会暴涨 60px）。
-const shellSrc = fs.readFileSync(path.join(HERE, '..', 'desktop', 'standalone', 'main.js'), 'utf8')
+// （shellSrc 已在上面页面侧那段读好了）
 ok(/const x2 = c\.x - \(c\.x % 2\), y2 = c\.y - \(c\.y % 2\)/.test(shellSrc),
   '拖动位置量化到偶数（实测只有这样窗口尺寸才不涨 → 画布不 resize → 不闪）', '')
 

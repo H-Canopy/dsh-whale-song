@@ -97,6 +97,9 @@ class FakeWin {
   webContents = {
     send: (ch, msg) => rec({ t: 'send', ch: ch, msg: msg }),
     on() {},
+    // 真 Electron 的 webContents 同时有 on/once；主进程用 once 挂"单位定案"那种一次性诊断。
+    // 桩子少了它会让整轮测试在启动阶段就抛 TypeError。
+    once(ev, fn) { rec({ t: 'once', ev: ev }); if (typeof fn === 'function') handlers['wc:' + ev] = fn },
     executeJavaScript: async () => null,
     setZoomFactor() {},
     setWindowOpenHandler: (fn) => { rec({ t: 'windowOpenHandler' }) },
