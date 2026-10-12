@@ -244,7 +244,12 @@ console.log('\n--- 统一层被关掉 / 没检测到播放器 ---')
     window: { dshwMediaCtl: () => ({ ok: true }) },
   })
   const wBtns = withWidget.buttons(withWidget.render())
-  ok(wBtns.some((b) => /挂件面板/.test(b.text)), '装了挂件时：「打开挂件面板」才出现', wBtns.map((b) => b.text).join(' / '))
+  // 「🎵 打开挂件面板」**已删除**：那个面板属于挂件 dsh-whale-widget，本插件里没有它；
+  // 我们的目标是"不让用户再装第二个插件"，所以不留一个点了没反应的按钮。
+  // 装了挂件也不再出现 —— 这条就是锁住这个决定（防以后有人又把它加回来）。
+  ok(!wBtns.some((b) => /挂件面板/.test(b.text)),
+    '即使装了挂件，也不再出现「打开挂件面板」（本插件里没有那个面板）', wBtns.map((b) => b.text).join(' / '))
+  ok(wBtns.some((b) => /播放·暂停/.test(b.text)), '遥控按钮照常在（删的只是那个死按钮）', wBtns.map((b) => b.text).join(' / '))
 }
 
 console.log('\n结果：pass ' + pass + ' / fail ' + fail)

@@ -31,6 +31,7 @@ const SUITES = [
   ['独立壳的本地服务', 'test-shell-server.mjs'],
   ['独立壳的窗口逻辑', 'test-shell-window.mjs'],
   ['右键双击音乐（统一层接线）', 'test-rightclick-media.mjs'],
+  ['不依赖挂件', 'test-no-widget-required.mjs'],
 ]
 
 const results = []

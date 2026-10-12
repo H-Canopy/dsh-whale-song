@@ -3880,12 +3880,10 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       }
       mGrid.append(mkMusic('⏮ 上一首', 'prev'), mkMusic('⏯ 播放·暂停', 'toggle'),
         mkMusic('⏭ 下一首', 'next'))
-      // 「打开挂件面板」只在**装了挂件**时才出：本仓库的目标是让挂件可退休，
-      // 没有挂件时这个按钮点了什么也不会发生（对第一次装的人是纯困惑）。
-      if (typeof window !== 'undefined'
-        && (typeof window.dshwMediaNow === 'function' || typeof window.dshwMediaCtl === 'function')) {
-        mGrid.appendChild(mkMusic('🎵 打开挂件面板', 'open-panel'))
-      }
+      // 这里原来有个「🎵 打开挂件面板」按钮。**已删**：那个面板属于挂件 dsh-whale-widget，
+      // 在我们这里根本不存在（命令发出去也只是返回 ok 却不做事），而且我们的目标是
+      // **不让用户再装第二个插件** —— 留一个"点了没反应"的按钮只会让人以为坏了。
+      // 她的音乐入口就是本页签（列播放器 / 遥控 / 本地音乐），没有别处。
       mbox.appendChild(mGrid)
 
       // —— 本地音乐（宿主自己的 music.json / music-file，E1 从挂件搬来）——
@@ -5125,7 +5123,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
    * 为什么要有它：「右键双击 = 播放/暂停」这条链路有三道可能断的地方 ——
    *   ① contextmenu 有没有到达（没到 = 窗口穿透/事件被吞）
    *   ② hitTest 有没有命中（没命中 = 点在模型透明处）
-   *   ③ dshwMediaCtl 返回了什么（ok=false = 没装挂件 / 播放器不认这个命令）
+   *   ③ 数据源返回了什么（统一层 dshwSongSMTC 优先；没装挂件时挂件那路为空）
    * 光看界面分不清是哪个，所以把这三步都记下来。读法：
    *   DSHPet.rightDebug()   → 返回数组；DSHPet.rightDebug(true) → 顺便打印到控制台。
    */
