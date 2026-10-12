@@ -30,6 +30,15 @@
 >
 > 我们的改动逐条记在 **[PLAN-OURS.md](PLAN-OURS.md)**；上游更新用 `git pull upstream main` 跟。
 >
+> **⚠️ 改桌面壳（`desktop/standalone/`）之前，先看这三处：**
+> · [`tools/shell-gen/`](tools/shell-gen/README.md) —— **`main.js` / `preload.js` / `window-shape.cjs` /
+>   `server.cjs` / `media-bridge.cjs` 都是生成物**，直接改会被下一次生成覆盖。要改逻辑请改它们的
+>   `.mjs` 源头，再跑 `node tools/shell-gen/<相应脚本>`，最后跑 `node tools/test-all.mjs`。
+> · [`tools/probe/`](tools/probe/README.md) —— 排查窗口 / 成型 / 拖动问题的探针
+>   （读回窗口区域、找窗口句柄、采样光标）。**它们自己必须声明 DPI 感知**，否则读到的坐标是逻辑值，
+>   会把正确的区域误报成「缩小了 0.667 倍」。
+> · [`docs/pet-shell/`](docs/pet-shell/) —— 桌面壳的实现定位表、架构说明与交接记录。
+>
 > **⚠️ 下面从「网页版一键部署」开始的内容是上游的原始文档**（其中的安装命令、Releases 链接、徽章都指向上游仓库），保留它们是署名的一部分；用本仓库时请以本段的安装命令为准。
 <!-- SONG-NOTE-END -->
 
