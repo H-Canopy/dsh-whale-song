@@ -325,14 +325,6 @@ function createMain() {
       })
     } catch (e) {}
   }, 16)
-  // 心跳：每 2 秒记一次「指针 vs 窗口」，用来确认坐标系（曾怀疑 DIP/物理混用）
-  setInterval(() => {
-    try {
-      const p = screen.getCursorScreenPoint(); const b = win ? win.getBounds() : { x: 0, y: 0, width: 0, height: 0 }
-      const inside = p.x >= b.x && p.x <= b.x + b.width && p.y >= b.y && p.y <= b.y + b.height
-      bootLog('hb: cursor=' + p.x + ',' + p.y + ' win=' + b.x + ',' + b.y + ',' + b.width + 'x' + b.height + ' inside=' + inside)
-    } catch (e) {}
-  }, 2000)
   win.once('ready-to-show', () => {
     bootLog('ready-to-show：窗口即将显示')
     bootLog('ready-to-show')
