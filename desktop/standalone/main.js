@@ -440,8 +440,9 @@ function clampPet(x, y, w, h) {
   ipcMain.on('shell-msg', (_e, msg) => {
     switch (msg) {
       case 'hidden':
-      case 'collapse':  // 折叠已删：收到也当显示处理
-        showPetAlways()
+      case 'collapse':
+        // `−` 按钮：原本是收起成小球，现在改成显示/隐藏她（小球已删）
+        togglePet()
         break
       case 'shown':
       case 'expand':
@@ -790,39 +791,74 @@ function showPetAlways() {
     win.webContents.executeJavaScript('window.DSHPet && DSHPet.setHidden && DSHPet.setHidden(false)').catch(() => {})
   } catch (err) {}
 }
+/**
+ * 把她整体藏起来 / 叫回来。
+ * 为什么不是"收起成小球"：小球是第二个透明窗口，真机上出过"被放到屏幕外、点不到、回不来"
+ * 和"越变越大"两次事故，所以整条删掉了。但"能把她收起来"这个需求是真的，
+ * 这里用主窗口自己的 hide/show 实现 —— 托盘图标一直在，所以永远叫得回来。
+ */
+let petHidden = false
+function showPet() {
+  if (!win || win.isDestroyed()) return
+  petHidden = false
+  win.showInactive()
+  win.setAlwaysOnTop(true, 'screen-saver')
+  win.webContents.executeJavaScript('window.DSHPet && DSHPet.setHidden && DSHPet.setHidden(false)').catch(() => {})
+  syncTrayMenu()
+  bootLog("桌宠: 已显示（托盘可再次隐藏）")
+}
+function hidePet() {
+  if (!win || win.isDestroyed()) return
+  petHidden = true
+  win.hide()
+  syncTrayMenu()
+  bootLog("桌宠: 已隐藏（托盘图标 → 显示桌宠 可以叫回来）")
+}
+function togglePet() { if (petHidden) showPet(); else hidePet() }
 // ——————————————————————————————————————————————————————————————
 // 托盘菜单（Windows 上没有菜单栏图标，改放系统托盘）
+/**
+ * 托盘菜单的**唯一**构建处（显示状态变了要刷文字，所以抽成函数）。
+ * 原来这套模板内联在 createTray 里、还被 setInterval 每 1.5s 重建一次；
+ * 现在改成"状态变化时重建"，顺便把「隐藏/显示桌宠」加进来。
+ */
+function syncTrayMenuBody() {
+  if (!tray) return
+  tray.setToolTip(petHidden ? 'DS 鲸鱼娘桌宠（已隐藏，点我显示）' : 'DS 鲸鱼娘桌宠')
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: petHidden ? '显示桌宠' : '隐藏桌宠', click: togglePet },
+    { label: '重新加载', click: load },
+    { label: '回到右下角', click: resetPos },
+    { type: 'separator' },
+    {
+      label: '低性能模式（少动、省电）',
+      type: 'checkbox',
+      checked: lowPower,
+      click: (mi) => {
+        lowPower = mi.checked
+        if (win) win.webContents.executeJavaScript('window.DSHPet && DSHPet.setLowPower && DSHPet.setLowPower(' + lowPower + ')').catch(() => {})
+        syncTrayMenu()
+      },
+    },
+    { label: '一键安装插件（如果还没装）', click: installPlugin },
+    { label: '打开 DSH 界面', click: () => shell.openExternal(petBase + '/') },
+    { type: 'separator' },
+    { label: '彻底退出', click: () => app.quit() },
+  ]))
+}
+function syncTrayMenu() {
+  if (!tray) return
+  try { syncTrayMenuBody() } catch (err) { bootLog("托盘菜单重建失败: " + String(err && err.message)) }
+}
 // ——————————————————————————————————————————————————————————————
 function createTray() {
   const iconPath = path.join(__dirname, 'build', 'icon.png')
   let img = nativeImage.createFromPath(iconPath)
   if (!img.isEmpty()) img = img.resize({ width: 16, height: 16 })
   tray = new Tray(img.isEmpty() ? nativeImage.createEmpty() : img)
-  tray.setToolTip('DS 鲸鱼娘桌宠')
-  const rebuild = () =>
-    tray.setContextMenu(
-      Menu.buildFromTemplate([
-        { label: '重新加载', click: load },
-        { label: '回到右下角', click: resetPos },
-        { type: 'separator' },
-        {
-          label: '低性能模式（少动、省电）',
-          type: 'checkbox',
-          checked: lowPower,
-          click: (mi) => {
-            lowPower = mi.checked
-            if (win) win.webContents.executeJavaScript('window.DSHPet && DSHPet.setLowPower && DSHPet.setLowPower(' + lowPower + ')').catch(() => {})
-          },
-        },
-        { label: '一键安装插件（如果还没装）', click: installPlugin },
-        { label: '打开 DSH 界面', click: () => shell.openExternal(petBase + '/') },
-        { type: 'separator' },
-        { label: '彻底退出', click: () => app.quit() },
-      ]),
-    )
-  tray.on('click', () => win && win.showInactive())
-  setInterval(rebuild, 1500)
-  rebuild()
+  // 说明文字与菜单项都由 syncTrayMenuBody() 负责（它会随隐藏/显示状态刷新）
+  tray.on('click', () => { if (petHidden) showPet(); else if (win) win.showInactive() })
+  syncTrayMenu()
 }
 
 function resetPos() {

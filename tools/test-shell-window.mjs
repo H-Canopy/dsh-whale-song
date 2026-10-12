@@ -339,7 +339,10 @@ console.log('\n--- 「收起成小球」已按主人要求整条删除 ---')
   const preloadCode = fs.readFileSync(path.join(SHELL, 'preload.js'), 'utf8')
   ok(!/ballWin/.test(collapsedCode) && !/createBall/.test(collapsedCode) && !/ballHTML/.test(collapsedCode),
     '小球窗口（第二个 BrowserWindow）已彻底删除', '')
-  ok(!/\bcollapsed\b/.test(collapsedCode) && !/收起成小球/.test(collapsedCode),
+  // ⚠️ 只检查**代码行**：删掉折叠之后，注释里还会提到"收起成小球"来解释为什么删它。
+  //    直接扫全文会把解释性注释当成残留（这条测试自己踩过）。
+  const codeOnly = collapsedCode.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
+  ok(!/\bcollapsed\b/.test(codeOnly) && !/收起成小球/.test(codeOnly),
     '折叠态与它的托盘菜单项已删除（不再有"回不来"的状态）', '')
   ok(!/ballMove|ballDrop/.test(preloadCode), 'preload 里小球用的桥已删除', '')
   // 但"显示她"的能力必须留着（收到 collapse/expand/shown 一律显示）
