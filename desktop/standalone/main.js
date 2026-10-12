@@ -283,20 +283,32 @@ function createMain() {
         if (wantX !== dragFrom.lastX || wantY !== dragFrom.lastY) {
           dragFrom.lastX = wantX
           dragFrom.lastY = wantY
+          // ⚠️ 必须夹进工作区（真机日志：want.y 会变成负数 → 窗口顶部跑出屏幕，她"消失/半截"）。
+          //   她画在窗口右下角（约距右边 20px、下边 10px、240×209），所以允许窗口左上角出屏，
+          //   但必须保证"她本体"留在工作区内 —— 否则你越用力往右上拖，她越看不见。
+          const PAD = 20
+          const bodyR = 240, bodyB = 209
+          const wa = screen.getPrimaryDisplay().workArea
+          const minX = wa.x - (dragFrom.w - bodyR - PAD)
+          const maxX = wa.x + wa.width - bodyR - PAD
+          const minY = wa.y - (dragFrom.h - bodyB - PAD)
+          const maxY = wa.y + wa.height - bodyB - PAD
+          const x2 = Math.max(minX, Math.min(maxX, wantX))
+          const y2 = Math.max(minY, Math.min(maxY, wantY))
           const t0 = Date.now()
           // 用 setBounds 并**固定按下时的宽高**：150% 缩放下 setPosition 有把尺寸改 ±1px 的
           // 已知毛病，尺寸一变画布 resize → 视觉上就是闪。
-          win.setBounds({ x: wantX, y: wantY, width: dragFrom.w, height: dragFrom.h })
+          win.setBounds({ x: x2, y: y2, width: dragFrom.w, height: dragFrom.h })
           const costMs = Date.now() - t0
           // 拖动轨迹诊断（只记前 80 帧）：want vs got 不一致 → 被挪走；宽高变化 → 闪的嫌疑
           try {
-            if (dragFrom.n < 80) {
+            if (dragFrom.n < 200) {
               dragFrom.n++
               const gb = win.getBounds()
               const now = Date.now()
               const gap = dragFrom.lastAt ? now - dragFrom.lastAt : 0
               dragFrom.lastAt = now
-              bootLog('drag: cur=' + p.x + ',' + p.y + ' want=' + wantX + ',' + wantY + ' got=' + gb.x + ',' + gb.y + ' size=' + gb.width + 'x' + gb.height + ' cost=' + costMs + 'ms gap=' + gap + 'ms' + (gb.x !== wantX || gb.y !== wantY ? ' <-- 被挪走' : '') + (gb.width !== dragFrom.w || gb.height !== dragFrom.h ? ' <-- 宽高变了！' : ''))
+              bootLog('drag: cur=' + p.x + ',' + p.y + ' want=' + wantX + ',' + wantY + ' set=' + x2 + ',' + y2 + ' got=' + gb.x + ',' + gb.y + ' size=' + gb.width + 'x' + gb.height + ' cost=' + costMs + 'ms gap=' + gap + 'ms' + (gb.x !== x2 || gb.y !== y2 ? ' <-- 被挪走' : '') + (gb.width !== dragFrom.w || gb.height !== dragFrom.h ? ' <-- 宽高变了(系统改的)' : ''))
             }
           } catch (err) {}
         }

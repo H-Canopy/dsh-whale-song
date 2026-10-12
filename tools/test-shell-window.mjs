@@ -266,8 +266,8 @@ console.log('\n--- 拖动：必须是 follow 语义（跟手），不是 push --
   // 夹取/取整把窗口挪走之后 —— push 会把那次误差一直带着（越拖越偏、撞夹取就跳回），
   // follow 每帧按"当前窗口位置"重算，不累积。桩模拟不出"被夹取"，所以断言**公式本身**。
   const shellSrc = fs.readFileSync(path.join(SHELL, 'main.js'), 'utf8')
-  ok(/const wantX = Math\.round\(p\.x - dragFrom\.grab\.x\)/.test(shellSrc) && /win\.setBounds\(\{ x: wantX, y: wantY/.test(shellSrc),
-    '拖动用的是 follow 公式：位置 = 指针 − 抓手偏移', '')
+  ok(/const wantX = Math\.round\(p\.x - dragFrom\.grab\.x\)/.test(shellSrc) && /win\.setBounds\(\{ x: x2, y: y2/.test(shellSrc),
+    '拖动用的是 follow 公式：位置 = 指针 − 抓手偏移（再夹进工作区）', '')
   ok(!/dragFrom\.win/.test(shellSrc),
     '拖动不再依赖"按下时的窗口位置"（push 的根源）', '')
   ok(!/p\.x - dragFrom\.mouse\.x/.test(shellSrc),
@@ -286,9 +286,12 @@ console.log('\n--- 拖动：必须是 follow 语义（跟手），不是 push --
     const returns = (body.match(/\breturn\b/g) || []).length
     ok(returns === 1, 'tick 里只有守卫那一处 return（实测 ' + returns + ' 处）', '')
   }
-  // 150% 缩放下 setPosition 有把尺寸改 ±1px 的毛病（画布 resize → 闪）→ 拖动必须固定宽高
-  ok(/win\.setBounds\(\{ x: wantX, y: wantY, width: dragFrom\.w, height: dragFrom\.h \}\)/.test(shellSrc),
+  // 150% 缩放下 setPosition 有把尺寸改 ±1px 的毛病（画布 resize → 闪）→ 拖动必须固定宽高；
+  // 且必须夹进工作区（真机日志：want.y 变负数 → 她跑出屏幕上方）
+  ok(/win\.setBounds\(\{ x: x2, y: y2, width: dragFrom\.w, height: dragFrom\.h \}\)/.test(shellSrc),
     '拖动用 setBounds 固定按下时的宽高（避免尺寸抖动导致闪）', '')
+  ok(/const minY = wa\.y - \(dragFrom\.h - bodyB - PAD\)/.test(shellSrc) && /const maxY = wa\.y \+ wa\.height - bodyB - PAD/.test(shellSrc),
+    '拖动时夹进工作区，保证她本体留在屏幕内', '')
   ok(/w: win\.getBounds\(\)\.width, h: win\.getBounds\(\)\.height/.test(shellSrc),
     'drag-start 时记下宽高', '')
   // 【实测根因守门员】Windows 计时器粒度 15.6ms 会把 setInterval(33) 拉成 46.6ms（实测），
