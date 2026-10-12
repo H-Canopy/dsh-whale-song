@@ -137,6 +137,10 @@ function setIgnore(on) {
 }
 
 async function poll() {
+  // ⚠️ 拖动期间**一律不碰穿透样式**（WS_EX_TRANSPARENT / setIgnoreMouseEvents）：
+  //   拖动中窗口在飞，getBounds() 可能滞后一帧，指针会"看起来在窗口外"；
+  //   若这时切到穿透，窗口就收不到按钮消息 → 拖动当场断开（外部评审也点了这条）。
+  if (dragTimer) return
   if (!win || win.isDestroyed() || !win.isVisible()) return
   const p = screen.getCursorScreenPoint()
   const b = win.getBounds()
@@ -145,7 +149,6 @@ async function poll() {
     setIgnore(true)
     return
   }
-  if (dragTimer) return // 拖动中不抢事件（否则鼠标一离开她就变穿透，拖动会断）
   try {
     const kind = await win.webContents.executeJavaScript(hitJS(Math.round(p.x - b.x), Math.round(p.y - b.y)))
     lastHit = kind
@@ -283,7 +286,7 @@ function createMain() {
       )
       if (kind === 'panel') return // 真控件（滑块/按钮/输入框）→ 让给网页
     } catch (e) {}
-    dragFrom = { grab: await grabOffset(), n: 0, lastX: NaN, lastY: NaN }
+    dragFrom = { grab: await grabOffset(), n: 0, lastX: NaN, lastY: NaN, lastAt: 0 }
     clearInterval(dragTimer)
     dragTimer = setInterval(() => {
       if (!dragFrom || !win) return
@@ -298,13 +301,20 @@ function createMain() {
             if (wantX === dragFrom.lastX && wantY === dragFrom.lastY) return
             dragFrom.lastX = wantX
             dragFrom.lastY = wantY
+            const t0 = Date.now()
             win.setPosition(wantX, wantY)
-            // 拖动轨迹诊断（只记前 80 帧）：want vs got 不一致就说明有东西把窗口挪回去了
+            const costMs = Date.now() - t0
+            // 拖动轨迹诊断（只记前 80 帧）：
+            //   want vs got 不一致 → 有东西把窗口挪回去了（夹取/系统限制）
+            //   cost 大 / gap 大    → 主进程供不起这个帧率（就是"晃/闪"的来源）
             try {
               if (dragFrom.n < 80) {
                 dragFrom.n++
                 const got = win.getPosition()
-                bootLog('drag: cur=' + p.x + ',' + p.y + ' want=' + wantX + ',' + wantY + ' got=' + got[0] + ',' + got[1] + (got[0] !== wantX || got[1] !== wantY ? ' <-- 被挪走' : ''))
+                const now = Date.now()
+                const gap = dragFrom.lastAt ? now - dragFrom.lastAt : 0
+                dragFrom.lastAt = now
+                bootLog('drag: cur=' + p.x + ',' + p.y + ' want=' + wantX + ',' + wantY + ' got=' + got[0] + ',' + got[1] + ' cost=' + costMs + 'ms gap=' + gap + 'ms' + (got[0] !== wantX || got[1] !== wantY ? ' <-- 被挪走' : ''))
               }
             } catch (err) {}
     }, 33)

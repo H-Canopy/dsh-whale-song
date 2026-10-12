@@ -272,6 +272,19 @@ console.log('\n--- 拖动：必须是 follow 语义（跟手），不是 push --
   ok(/\}, 33\)/.test(shellSrc), '拖动帧率是 30fps（33ms），不是 60fps —— 60fps 在这类机器上供不起', '')
   ok(/wantX === dragFrom\.lastX && wantY === dragFrom\.lastY/.test(shellSrc),
     '位置没变就不调 setPosition（省一半开销）', '')
+  // 【真 bug 守门员】拖动期间**绝不能**切换穿透样式（WS_EX_TRANSPARENT / setIgnoreMouseEvents）：
+  // 拖动中窗口在飞，getBounds() 可能滞后一帧 → 指针"看起来在窗口外" → setIgnore(true)
+  // → 窗口收不到按钮消息 → 拖动当场断（外部评审清单里的第 4/6 条就是这个坑）。
+  {
+    const i = shellSrc.indexOf('async function poll()')
+    const seg = i >= 0 ? shellSrc.slice(i, i + 600) : ''
+    const guardLine = seg.split('\n').findIndex((l) => /if \(dragTimer\) return/.test(l))
+    const rectLine = seg.split('\n').findIndex((l) => /p\.x < b\.x/.test(l))
+    ok(guardLine > 0, 'poll() 里有拖动守卫', '')
+    ok(guardLine > 0 && rectLine > 0 && guardLine < rectLine,
+      '拖动守卫必须在"指针是否在窗口内"之前（否则拖动中会被切回穿透，拖动断掉）',
+      '守卫第 ' + guardLine + ' 行 / 矩形判断第 ' + rectLine + ' 行')
+  }
 }
 
 console.log('\n--- 贴边小球（第二个透明窗口）---')
