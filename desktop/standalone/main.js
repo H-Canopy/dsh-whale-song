@@ -66,8 +66,8 @@ function deskPort() {
 const petURL = () => petBase + '/dsh-pet/app'
 const PLUGIN = 'github:Andersen216/dsh-whale-girl-live2d'
 // 同 macOS：窗口要装得下她 + 四周的面板（透明区域点击穿透，不挡别的窗口）
-const WIN_W = 560
-const WIN_H = 900   // 只加高：给她头顶留出聊天框的位置
+const WIN_W = Number(process.env.DSHW_PET_W || 420) // 窗口只是"画布"：她只占右下角一块，其余是透明的
+const WIN_H = Number(process.env.DSHW_PET_H || 600) // 别比屏幕可视区还高（实测：900 高在可视 1019 的屏上，往上拖会被"夹回"挡住，像被关在框里）
 const BALL = 62
 const TOKEN_FILE = path.join(os.homedir(), '.dsh', 'dsh-live2d-pet-desktop.json')
 
@@ -150,6 +150,12 @@ async function poll() {
     lastHit = kind
     overPanel = kind === 'panel'
     setIgnore(kind === 'none')
+    // 拖动诊断：回答"为什么有时候抓不住她"。每 400ms 最多一行，很便宜。
+    const nowMs = Date.now()
+    if (nowMs - (globalThis.__dragDiagAt || 0) > 400) {
+      globalThis.__dragDiagAt = nowMs
+      bootLog('diag: cursor=' + p.x + ',' + p.y + ' local=' + Math.round(p.x - b.x) + ',' + Math.round(p.y - b.y) + ' hit=' + kind + ' ignore=' + (kind === 'none'))
+    }
   } catch (e) {
     setIgnore(true)
   }
@@ -196,14 +202,11 @@ function createMain() {
   win.setMenuBarVisibility(false)
 
   const wa = screen.getPrimaryDisplay().workArea
-  if (FULLSCREEN_PRIMARY) {
-    // 铺满主屏时不恢复历史位置：位置就是这个整块工作区
-    win.setPosition(waFs.x, waFs.y)
-    bootLog('已启用「铺满主屏」（settings.json: fullscreenPrimary=true）')
-  } else {
-    const saved = readPos()
-    win.setPosition(saved ? saved[0] : wa.x + wa.width - WIN_W - 8, saved ? saved[1] : wa.y + wa.height - WIN_H - 8)
-  }
+    // —— 独立壳改动 ⑦：把窗口右下角钉在屏幕右下角 ——
+    // 她在窗口内是靠右下角渲染的，所以钉住右下角 = 把她固定在"离屏幕角 OFFSET 像素"处；
+    // 窗口左上角伸出屏幕多少都不影响她（那块本来就是透明的），而且窗口越小越好拖。
+    const OFFSET = 12
+    win.setPosition(wa.x + wa.width - WIN_W - OFFSET, wa.y + wa.height - WIN_H - OFFSET)
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
@@ -237,6 +240,18 @@ function createMain() {
   win.on('closed', () => { win = null })
 
   // 拖动：页面里按下她 → 交给主进程搬窗口（拖动期间用 16ms 快速轮询，跟手）
+  // 抓手偏移：按下时算一次「指针 − 窗口左上角」，之后 位置 = 指针 − 偏移（follow 语义）。
+  // 两者都是 Electron 的 DIP 坐标（实测 scaleFactor=1.5 时同尺度），可直接相减。
+  async function grabOffset() {
+    try {
+      const p = screen.getCursorScreenPoint()
+      const [wx, wy] = win.getPosition()
+      return { x: p.x - wx, y: p.y - wy }
+    } catch (err) {
+      return { x: 0, y: 0 }
+    }
+  }
+
   ipcMain.on('drag-start', async (_e, at) => {
     // 小球用的是同一个 preload，也会发 drag-start；主窗口只是 hide() 没 destroy()，
     // 不加这条守卫就会把看不见的主窗口搬走（PR 反馈）
@@ -251,12 +266,12 @@ function createMain() {
       )
       if (kind === 'panel') return // 真控件（滑块/按钮/输入框）→ 让给网页
     } catch (e) {}
-    dragFrom = { mouse: at, win: win.getPosition() }
+    dragFrom = { grab: await grabOffset() }
     clearInterval(dragTimer)
     dragTimer = setInterval(() => {
       if (!dragFrom || !win) return
       const p = screen.getCursorScreenPoint()
-      win.setPosition(dragFrom.win[0] + (p.x - dragFrom.mouse.x), dragFrom.win[1] + (p.y - dragFrom.mouse.y))
+      win.setPosition(Math.round(p.x - dragFrom.grab.x), Math.round(p.y - dragFrom.grab.y))
     }, 16)
     win.webContents.executeJavaScript("document.dispatchEvent(new PointerEvent('pointercancel',{bubbles:true}))").catch(() => {})
   })
@@ -322,6 +337,15 @@ function createMain() {
     } catch (e) {}
   }, 16)
   pollTimer = setInterval(poll, 90)
+  bootLog('拖动脉冲轮询已启动（90ms）')
+  // 心跳：每 2 秒记一次「指针 vs 窗口」，用来确认坐标系（曾怀疑 DIP/物理混用）
+  setInterval(() => {
+    try {
+      const p = screen.getCursorScreenPoint(); const b = win ? win.getBounds() : { x: 0, y: 0, width: 0, height: 0 }
+      const inside = p.x >= b.x && p.x <= b.x + b.width && p.y >= b.y && p.y <= b.y + b.height
+      bootLog('hb: cursor=' + p.x + ',' + p.y + ' win=' + b.x + ',' + b.y + ',' + b.width + 'x' + b.height + ' inside=' + inside)
+    } catch (e) {}
+  }, 2000)
   win.once('ready-to-show', () => {
     bootLog('ready-to-show：窗口即将显示')
     bootLog('ready-to-show')

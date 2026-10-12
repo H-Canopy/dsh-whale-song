@@ -30,6 +30,7 @@ const SUITES = [
   ['单机模式（无后端）', 'test-standalone.mjs'],
   ['独立壳的本地服务', 'test-shell-server.mjs'],
   ['独立壳的窗口逻辑', 'test-shell-window.mjs'],
+  ['右键双击音乐（统一层接线）', 'test-rightclick-media.mjs'],
 ]
 
 const results = []

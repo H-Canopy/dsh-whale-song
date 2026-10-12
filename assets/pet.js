@@ -2675,8 +2675,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     }
   }
 
-  /** 点信封：开/关简报面板；打开即视为已读（面板里仍保留历史） */
-  function toggleReport() {
+  /** 点信封：开/关简报面板；打开即视为已读（面板里仍保留历史） */  function toggleReport() {
     if (!mail.panel) return
     const open = !mail.panel.classList.contains('dshp-on')
     if (open) {
@@ -2794,7 +2793,8 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     document.addEventListener(
       'contextmenu',
       (e) => {
-        if (!hitTest(e.clientX, e.clientY)) return
+        dshwRightTrace('contextmenu', { x: e.clientX, y: e.clientY, target: (e.target && e.target.className) || '' })
+        if (!hitTest(e.clientX, e.clientY)) { dshwRightTrace('miss', 'hitTest=false（点在模型的透明处，或掩码没就绪）'); return }
         e.preventDefault()
         e.stopPropagation()
         // 主人要求：右键弹「余额 / 本轮消耗 / 峰谷」这个框，不再直接弹设置菜单
@@ -2804,20 +2804,28 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
         try {
           const nowMs = Date.now()
           if (dshwSongLastRightAt && nowMs - dshwSongLastRightAt < 450) {
+            dshwRightTrace('double', { gapMs: nowMs - dshwSongLastRightAt })
             dshwSongLastRightAt = 0
             if (hud.open) closeHud()
             // 先读切换前的状态，好把气泡写成"已暂停 / 继续播放"（含糊的"已切换"没法确认到底按没按上）
             let before = null
-            try { before = (typeof window.dshwMediaNow === 'function') ? window.dshwMediaNow() : null } catch (err) { before = null }
-            const r = (typeof window.dshwMediaCtl === 'function') ? window.dshwMediaCtl('toggle') : null
-            let msg
-            if (r && r.ok) {
-              const tail = (before && before.ok && before.title) ? '：' + before.title : ''
-              msg = (before && before.ok) ? ((before.playing ? '已暂停 ⏸' : '继续播放 ▶') + tail) : '音乐已切换 ✓'
-            } else {
-              msg = (r && r.error) || '挂件没装，遥控不可用'
+            try { before = dshwSongNowAny() } catch (err) { before = null }
+            const r = dshwSongToggleAny()
+            dshwRightTrace('ctl', { hasCtl: typeof window.dshwMediaCtl === 'function', hasSmtc: !!(window.dshwSongSMTC && window.dshwSongSMTC.control), result: r ? JSON.stringify(r).slice(0, 160) : String(r) })
+            // 统一层是**异步**的（要等宿主回话）：气泡必须等结果回来再写，
+            // 否则 r.ok 是 undefined，永远显示"遥控不可用"（踩过）。
+            const showToggleMsg = (res) => {
+              let msg
+              if (res && res.ok) {
+                const tail = (before && before.ok && before.title) ? '：' + before.title : ''
+                msg = (before && before.ok) ? ((before.playing ? '已暂停 ⏸' : '继续播放 ▶') + tail) : '音乐已切换 ✓'
+              } else {
+                msg = (res && res.reason) || (res && res.error) || '没检测到在放东西的播放器（放一首再试）'
+              }
+              try { ui.bubble.show(msg, { name: 'DS 鲸鱼娘', ttl: 2000 }) } catch (err) {}
             }
-            try { ui.bubble.show(msg, { name: 'DS 鲸鱼娘', ttl: 2000 }) } catch (err) {}
+            if (r && typeof r.then === 'function') r.then(showToggleMsg, () => showToggleMsg(null))
+            else showToggleMsg(r)
             return
           }
           dshwSongLastRightAt = nowMs
@@ -4805,6 +4813,15 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     clearProps,
     playMotion,
     hitTest,
+    /**
+     * 右键自检：读最近的右键链路记录（只在 URL 带 `?dshpDebug=1` 时有内容）。
+     * 用法：DSHPet.rightDebug() 取数组；DSHPet.rightDebug(true) 顺便打到控制台。
+     * 每条是一个 { t, step, data }，step 取值：contextmenu / miss / double / ctl。
+     */
+    rightDebug: (print) => {
+      if (print) { try { console.table(dshwRightLog) } catch (err) { console.log(dshwRightLog) } }
+      return dshwRightLog.slice()
+    },
     /** 隐藏 / 恢复。壳子（桌面版）收起成小球后，靠它把页面里的状态一起改回来 */
     setHidden,
     /** 壳子告诉页面「你记着的连接档位是哪一档」（设置页据此高亮） */
@@ -5103,6 +5120,59 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
   // 右键双击（=播放/暂停）的上一击时间戳；0 表示没有待配对的单击。
   // 用 var 声明在这里也能被前面的 contextmenu 处理器读到（函数作用域内变量提升）。
   var dshwSongLastRightAt = 0
+  /**
+   * 右键自检：只在 URL 带 `?dshpDebug=1` 时记录，缓冲最近 40 条。
+   * 为什么要有它：「右键双击 = 播放/暂停」这条链路有三道可能断的地方 ——
+   *   ① contextmenu 有没有到达（没到 = 窗口穿透/事件被吞）
+   *   ② hitTest 有没有命中（没命中 = 点在模型透明处）
+   *   ③ dshwMediaCtl 返回了什么（ok=false = 没装挂件 / 播放器不认这个命令）
+   * 光看界面分不清是哪个，所以把这三步都记下来。读法：
+   *   DSHPet.rightDebug()   → 返回数组；DSHPet.rightDebug(true) → 顺便打印到控制台。
+   */
+  var dshwRightLog = []
+  /**
+   * 播放/暂停「当前音源」，**按统一层优先**的顺序试：
+   *   ① window.dshwSongSMTC.control  —— 我们自己的统一层（系统媒体会话，不装挂件也能用）
+   *   ② window.dshwMediaCtl          —— 挂件那套（装了就优先控它自己的播放器/网易云）
+   * 为什么要这个函数：右键双击原来**只**读 ②，于是没装挂件时静默什么都不发生
+   * （自检 `DSHPet.rightDebug()` 里能看到 hasCtl:false / hasSmtc:true → result:null）。
+   * 返回可能是 Promise（统一层是异步的），调用方两种都处理。
+   */
+  function dshwSongToggleAny(cmd) {
+    var c = String(cmd || 'toggle')
+    try {
+      var smtc = window.dshwSongSMTC
+      if (smtc && typeof smtc.control === 'function') return smtc.control(c)
+    } catch (err) {}
+    try {
+      if (typeof window.dshwMediaCtl === 'function') return window.dshwMediaCtl(c)
+    } catch (err) {}
+    return null
+  }
+  /**
+   * 「现在在放什么」：同样统一层优先。
+   * 形状对齐：{ ok, playing, title, artist }（挂件的就是这个形状，统一层我们做了适配）。
+   */
+  function dshwSongNowAny() {
+    var out = null
+    try {
+      var smtc = window.dshwSongSMTC
+      if (smtc && typeof smtc.now === 'function') {
+        var n = smtc.now()
+        if (n && n.ok) return n
+        out = n
+      }
+    } catch (err) {}
+    try { if (typeof window.dshwMediaNow === 'function') return window.dshwMediaNow() } catch (err) {}
+    return out
+  }
+  function dshwRightTrace(step, data) {
+    try {
+      if (!/[?&]dshpDebug=1/.test(location.search)) return
+      dshwRightLog.push({ t: Date.now(), step: step, data: data })
+      if (dshwRightLog.length > 40) dshwRightLog.shift()
+    } catch (err) {}
+  }
   pushReport = function (title, body) {
     if (!CFG.songShowReports) return
     return dshwSongOrigPushReport(title, body)

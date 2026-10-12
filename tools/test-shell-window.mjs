@@ -115,11 +115,13 @@ const app = {
   dock: { hide() {} },
 }
 const screen = {
-  getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 }, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, scaleFactor: 1 }),
+  getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 }, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, scaleFactor: 1.5 }),
   getAllDisplays: () => [{ workArea: { x: 0, y: 0, width: 1920, height: 1040 }, bounds: { x: 0, y: 0, width: 1920, height: 1080 } }],
   getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1040 }, bounds: { x: 0, y: 0, width: 1920, height: 1080 } }),
-  getCursorScreenPoint: () => ({ x: 800, y: 600 }),
+  // 光标位置由测试控制：壳的拖动逻辑读它来算新位置
+  getCursorScreenPoint: () => Object.assign({}, global.__cursor || { x: 800, y: 600 }),
 }
+global.__cursor = { x: 800, y: 600 }
 class FakeTray {
   constructor(img) { this.menu = null; rec({ t: 'tray' }) }
   setToolTip(t) { rec({ t: 'tray.tooltip', t: t }) }
@@ -232,6 +234,23 @@ console.log('\n--- 托盘 ---')
   ok(items.length >= 3, '托盘菜单有 ' + items.length + ' 项：' + items.join(' / '), '')
   const joined = items.join(' ')
   ok(/显示|隐藏|收起|退出/.test(joined), '菜单项含显示/隐藏/收起/退出这类动作', joined)
+}
+
+console.log('\n--- 拖动：必须是 follow 语义（跟手），不是 push ---')
+{
+  // 上游的写法是 `起点 + (指针 − 按下点)`（push 语义），我们改成 follow：
+  // 按下时记住"指针相对窗口左上角的偏移"，之后 位置 = 指针 − 偏移。
+  // 说明：窗口**没被夹取**时两种写法数学上等价（都等于 指针−固定偏移）；差异只出现在
+  // 夹取/取整把窗口挪走之后 —— push 会把那次误差一直带着（越拖越偏、撞夹取就跳回），
+  // follow 每帧按"当前窗口位置"重算，不累积。桩模拟不出"被夹取"，所以断言**公式本身**。
+  const shellSrc = fs.readFileSync(path.join(SHELL, 'main.js'), 'utf8')
+  ok(/setPosition\(Math\.round\(p\.x - dragFrom\.grab\.x\), Math\.round\(p\.y - dragFrom\.grab\.y\)\)/.test(shellSrc),
+    '拖动用的是 follow 公式：位置 = 指针 − 抓手偏移', '')
+  ok(!/dragFrom\.win/.test(shellSrc),
+    '拖动不再依赖"按下时的窗口位置"（push 的根源）', '')
+  ok(!/p\.x - dragFrom\.mouse\.x/.test(shellSrc),
+    '拖动不再用"指针相对按下点的位移"（那是不跟手的根源）', '')
+  ok(/async function grabOffset\(\)/.test(shellSrc), '有 grabOffset()：按下时只算一次抓手偏移', '')
 }
 
 console.log('\n--- 贴边小球（第二个透明窗口）---')
