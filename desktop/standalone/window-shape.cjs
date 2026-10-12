@@ -42,6 +42,7 @@ function helperSource() {
     '$rw = [int]$args[5]',
     '$rh = [int]$args[6]',
     '$png = [string]$args[7]',
+    '$pad = [int]$args[8]',
     'Add-Type -AssemblyName System.Drawing',
     'Add-Type @\'',
     'using System;',
@@ -67,10 +68,10 @@ function helperSource() {
     '      if ($c.R -gt 127) {',
     '        $gx0 = $gx',
     '        while ($gx -lt $gw -and $bmp.GetPixel($gx, $gy).R -gt 127) { $gx++ }',
-    '        $x0 = [int][math]::Round($rx + $gx0 * $sx)',
-    '        $x1 = [int][math]::Round($rx + $gx * $sx)',
-    '        $y0 = [int][math]::Round($ry + $gy * $sy)',
-    '        $y1 = [int][math]::Round($ry + ($gy + 1) * $sy)',
+    '        $x0 = [int][math]::Round($rx + $gx0 * $sx) - $pad',
+    '        $x1 = [int][math]::Round($rx + $gx * $sx) + $pad',
+    '        $y0 = [int][math]::Round($ry + $gy * $sy) - $pad',
+    '        $y1 = [int][math]::Round($ry + ($gy + 1) * $sy) + $pad',
     '        if ($x1 -le $x0) { $x1 = $x0 + 1 }',
     '        if ($y1 -le $y0) { $y1 = $y0 + 1 }',
     '        $r = [WShape]::CreateRectRgn($x0, $y0, $x1, $y1)',
@@ -113,7 +114,10 @@ function createShaper(opts) {
   const getHwnd = o.getHwnd
   /** 窗口所在显示器的缩放（CSS→物理像素）。不给就按 1（不缩放）。 */
   const getScale = typeof o.getScale === 'function' ? o.getScale : () => 1
+  /** 轮廓向外**膨胀**的 DIP 数（阴影/光晕/姿势漂移的余量）。注意：是膨胀，不是把矩形拉大——后者会把轮廓拉伸变形。 */
   const expand = Number.isFinite(o.expand) ? o.expand : 0
+  /** 两次「应用」之间至少隔多久（每次都要起一个 PowerShell，她一直在动，不限频会吃满 CPU） */
+  const minGapMs = Number.isFinite(o.minGapMs) ? o.minGapMs : 500
   const log = typeof o.log === 'function' ? o.log : () => {}
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dshw-shape-'))
   const psFile = path.join(dir, 'shape.ps1')
@@ -126,16 +130,26 @@ function createShaper(opts) {
   let lastKey = ''
   let lastResult = null
   let applied = 0
+  let lastApplyAt = 0
 
+  /**
+   * 「同一个形状」的判据。⚠️ 必须带**掩码内容**：她换姿势后轮廓变了、舞台矩形没变，
+   * 只比矩形会把新轮廓当成旧的丢掉（区域就永远停在第一次提交的那一帧）。
+   */
   function keyOf(s) {
-    return [s.gw, s.gh, s.x, s.y, s.w, s.h].join(',')
+    const b = String(s.bits || '')
+    let h = 0
+    for (let i = 0; i < b.length; i += 3) h = (h * 31 + b.charCodeAt(i)) | 0
+    return [s.gw, s.gh, s.x, s.y, s.w, s.h, b.length, h].join(',')
   }
 
   function applyOnce(shape) {
     return new Promise((resolve) => {
       let png
       try { png = writeMaskPng(shape.bits, dir) } catch (err) { resolve({ ok: false, error: String(err && err.message) }); return }
-      // maskBbox 诊断：算一遍掩码内容范围（gx0,gx1,gy0,gy1），写进 detail
+      // maskBbox 诊断：把掩码 PNG 的字节数也写进 detail，便于核对"提交的掩码是不是这份"。
+      // ⚠️ 这段必须留在 .mjs 里（.cjs 是它的机械生成物）。以前它只写在生成器里，
+      //    结果 .cjs 有、.mjs 没有 —— 一次重新生成就会把诊断丢掉（架构债，已还）。
       let maskBbox = null
       try {
         const bb = fs.readFileSync(png)
@@ -152,9 +166,10 @@ function createShaper(opts) {
       const args = [
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', psFile,
         String(hwnd), String(shape.gw), String(shape.gh),
-        String(Math.round((shape.x - expand) * k)), String(Math.round((shape.y - expand) * k)),
-        String(Math.round((shape.w + expand * 2) * k)), String(Math.round((shape.h + expand * 2) * k)),
+        String(Math.round(shape.x * k)), String(Math.round(shape.y * k)),
+        String(Math.round(shape.w * k)), String(Math.round(shape.h * k)),
         png,
+        String(Math.round(expand * k)),
       ]
       let child
       try {
@@ -173,7 +188,7 @@ function createShaper(opts) {
       child.on('error', (e) => settle({ ok: false, error: 'spawn-failed: ' + String(e && e.message) }))
       child.on('close', (code) => {
         const line = String(out).trim().split(/\r?\n/).filter(Boolean).pop() || ''
-        if (code === 0 && /^OK /.test(line)) settle({ ok: true, detail: line + ' | mask=' + JSON.stringify(maskBbox) + ' | in=' + JSON.stringify({ hwnd: hwnd, gw: shape.gw, gh: shape.gh, x: Math.round(shape.x - expand), y: Math.round(shape.y - expand), w: Math.round(shape.w + expand * 2), h: Math.round(shape.h + expand * 2) }) })
+        if (code === 0 && /^OK /.test(line)) settle({ ok: true, detail: line + ' | mask=' + JSON.stringify(maskBbox) + ' | in=' + JSON.stringify({ hwnd: hwnd, gw: shape.gw, gh: shape.gh, x: Math.round(shape.x), y: Math.round(shape.y), w: Math.round(shape.w), h: Math.round(shape.h), pad: expand }) })
         else settle({ ok: false, error: line || ('exit ' + code), diag: String(errOut).slice(-300) })
       })
     })
@@ -184,11 +199,16 @@ function createShaper(opts) {
     running = true
     try {
       while (pending) {
+        // 限频：等够间隔再取「最新」的那个（等的这段时间里新来的会覆盖 pending，天然合并）
+        const wait = lastApplyAt + minGapMs - Date.now()
+        if (wait > 0) await new Promise((res) => setTimeout(res, wait))
         const shape = pending
         pending = null
+        if (!shape) continue
         const key = keyOf(shape)
-        if (key === lastKey) continue          // 同一个形状，不重复裁
+        if (key === lastKey) continue          // 同一个形状（含内容），不重复裁
         const r = await applyOnce(shape)
+        lastApplyAt = Date.now()
         if (r.ok) { lastKey = key; applied++; lastResult = r; log('窗口已成型：' + r.detail) }
         else log('窗口成型失败：' + r.error + (r.diag ? ' | ' + r.diag : ''))
       }

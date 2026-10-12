@@ -1637,6 +1637,13 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     // 掩码在 postrender 里采：此刻 WebGL 缓冲刚画好，且模型的世界变换已生效。
     // 必须在测量之前注册——测量就是靠它把画面读出来算实体范围的。
     app.renderer.on('postrender', () => {
+      // 桌面壳里掩码还要拿去裁窗口（SetWindowRgn），而她的姿势/表情/道具一直在变：
+      // 原来掩码只在尺寸/取景变化（mask.dirty）时才重采，等于一张「定格快照」，
+      // 之后任何偏离快照的部位（举起的道具、尾巴、换姿势）既点不中、也会被窗口区域裁掉。
+      // 所以壳模式下每隔 MASK_REFRESH_MS 主动标脏一次（一次 128×112 的回读，约 1Hz，很便宜）。
+      if (SHELL_MASK_LIVE && !mask.dirty && !mask.building && performance.now() - mask.lastBuild > MASK_REFRESH_MS) {
+        mask.dirty = true
+      }
       if (mask.dirty && !mask.building) buildMask()
     })
 
@@ -1980,6 +1987,9 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
   // ——————————————————————————————————————————————————————————————
 
   const mask = { grid: null, w: 0, h: 0, dirty: true, building: false, lastBuild: 0, bbox: null, bands: null }
+  /** 桌面壳（有 __DSHPET_SHELL__）里才周期性重采掩码；网页/DSH 插件里保持原行为 */
+  const SHELL_MASK_LIVE = !!window.__DSHPET_SHELL__
+  const MASK_REFRESH_MS = 1200
 
   /**
    * 一条竖带里「实体质量的横向重心与范围」。

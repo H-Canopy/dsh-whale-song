@@ -513,8 +513,9 @@ async function startLocalServer() {
           return buf.length >= 8 ? Number(buf.readBigUInt64LE(0)) : Number(buf.readUInt32LE(0))
         } catch (err) { return null }
       },
-      // 阴影/光晕在掩码之外，往外交替膨胀几像素，免得被区域切掉（真机对比后再调）
-      expand: 6,
+      // 轮廓向外**膨胀**的 DIP 数（阴影/光晕/姿势漂移的余量）。
+      // 6→24：现在是真正的「轮廓膨胀」（原来是把矩形拉大，轮廓会被拉伸变形，本身也是偏移来源）。
+      expand: 24,
       // 关键单位换算（实测）：页面给的是 CSS 像素 = DIP，而 SetWindowRgn 收**物理像素**。
       // 150% 缩放时不做这步，区域会小 1/1.5 倍并被推到窗口外（实测区域 = 期望 × 0.667）。
       getScale: () => {

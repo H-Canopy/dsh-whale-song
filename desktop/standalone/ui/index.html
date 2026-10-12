@@ -41,7 +41,10 @@
       var m = null
       try { m = window.DSHPet.maskInfo() } catch (e) { m = null }
       if (!m || !m.bits) return
-      var key = [m.gw, m.gh, m.x, m.y, m.w, m.h, m.bits.length].join(',')
+      // key 必须带「内容」：只看 bits.length 的话，轮廓变了但 PNG 字节数恰好相同就会被当成没变而漏提交
+      var hash = 0
+      for (var i = 0; i < m.bits.length; i += 3) hash = (hash * 31 + m.bits.charCodeAt(i)) | 0
+      var key = [m.gw, m.gh, m.x, m.y, m.w, m.h, m.bits.length, hash].join(',')
       if (key === lastKey) return
       lastKey = key
       try {
