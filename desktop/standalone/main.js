@@ -75,6 +75,7 @@ const TOKEN_FILE = path.join(os.homedir(), '.dsh', 'dsh-live2d-pet-desktop.json'
 let win = null
 let ballWin = null
 let tray = null
+let pollTimer = null
 let cursorFeed = null
 let lastCursor = null
 let dragTimer = null
@@ -130,10 +131,36 @@ const hitJS = (x, y) => `(function(){try{
   return 'none';
 }catch(e){return 'none'}})()`
 
+function setIgnore(on) {
+  if (!win || win.isDestroyed()) return
+  win.setIgnoreMouseEvents(on, { forward: true })
+}
 
-// —— 已删除：90ms 的"鼠标在不在她身上"轮询 + setIgnoreMouseEvents ——
-// 现在这件事由**窗口形状**决定（petShaper / window-shape.mjs）：她的轮廓之外根本不算窗口，
-// 鼠标事件由操作系统直接交给下面的窗口；轮廓之内则**永远**可点，没有"还没轮到轮询就被按掉"的空窗。
+async function poll() {
+  if (!win || win.isDestroyed() || !win.isVisible()) return
+  const p = screen.getCursorScreenPoint()
+  const b = win.getBounds()
+  if (p.x < b.x || p.x > b.x + b.width || p.y < b.y || p.y > b.y + b.height) {
+    lastHit = 'none'
+    setIgnore(true)
+    return
+  }
+  if (dragTimer) return // 拖动中不抢事件（否则鼠标一离开她就变穿透，拖动会断）
+  try {
+    const kind = await win.webContents.executeJavaScript(hitJS(Math.round(p.x - b.x), Math.round(p.y - b.y)))
+    lastHit = kind
+    overPanel = kind === 'panel'
+    setIgnore(kind === 'none')
+    // 拖动诊断：回答"为什么有时候抓不住她"。每 400ms 最多一行，很便宜。
+    const nowMs = Date.now()
+    if (nowMs - (globalThis.__dragDiagAt || 0) > 400) {
+      globalThis.__dragDiagAt = nowMs
+      bootLog('diag: cursor=' + p.x + ',' + p.y + ' local=' + Math.round(p.x - b.x) + ',' + Math.round(p.y - b.y) + ' hit=' + kind + ' ignore=' + (kind === 'none'))
+    }
+  } catch (e) {
+    setIgnore(true)
+  }
+}
 
 // ——————————————————————————————————————————————————————————————
 // 主窗口
@@ -184,10 +211,11 @@ function createMain() {
     },
   })
   win.setAlwaysOnTop(true, 'screen-saver')
-  // 注意：**不要**在这里调 setIgnoreMouseEvents(true)。
-  // 上游是"矩形窗口 + 整窗穿透 + 轮询按需关掉"；我们现在靠**窗口形状**（Win32 区域）实现同样的效果：
-  // 她的轮廓之外根本不算窗口，鼠标事件由系统直接交给下面的窗口 —— 所以整窗穿透这句必须去掉，
-  // 否则连她身上也点不到。
+  // —— 穿透机制：默认走上游那套（整窗穿透 + 90ms 轮询按需关掉）——
+  // 「窗口成型」（settings.json: shapeWindow=true）是另一条路：把窗口裁成她的轮廓，
+  // 轮廓之外根本不算窗口。两者**互斥**：成型开着时应改用下面这行注释掉的形式
+  // （否则连她身上也点不到）；成型关着时必须保留整窗穿透，否则矩形窗口会挡住鼠标。
+  win.setIgnoreMouseEvents(true, { forward: true })
   win.setMenuBarVisibility(false)
 
   const wa = screen.getPrimaryDisplay().workArea
@@ -325,6 +353,8 @@ function createMain() {
       })
     } catch (e) {}
   }, 16)
+  pollTimer = setInterval(poll, 90)
+  bootLog('拖动脉冲轮询已启动（90ms）')
   win.once('ready-to-show', () => {
     bootLog('ready-to-show：窗口即将显示')
     bootLog('ready-to-show')
@@ -825,5 +855,6 @@ app.whenReady().then(async () => {
 })
 app.on('window-all-closed', () => app.quit())
 app.on('before-quit', () => {
+  clearInterval(pollTimer)
   clearInterval(dragTimer)
 })
