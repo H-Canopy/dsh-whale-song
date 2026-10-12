@@ -212,10 +212,13 @@ console.log('\n--- 主窗口参数（透明 / 置顶 / 穿透 / 不进任务栏�
   ok(o.resizable === false && o.hasShadow === false, 'resizable:false + hasShadow:false', JSON.stringify({ r: o.resizable, s: o.hasShadow }))
   const top = of('alwaysOnTop')
   ok(top.length > 0 && top[0].v === true && top[0].level === 'screen-saver', '置顶：setAlwaysOnTop(true, "screen-saver")', JSON.stringify(top[0] || null))
-  // 默认机制仍然是上游那套：**整窗穿透 + 90ms 轮询按需关掉**。
-  // （"窗口成型"是另一条路，默认关着；开着时才应该去掉整窗穿透 —— 见下面的断言。）
+  // 【结构性修复 · 真机日志证据】**不再**用 setIgnoreMouseEvents 切穿透：
+  //   真机日志里 `preload: mousedown` 0 条、`mouseup` 却到了 —— 说明按下被"穿透"吃掉了
+  //   （Electron 的 forward:true 只转发移动，不转发按键）；而 ignore 反复翻转会让整个
+  //   分层窗口反复重新合成 = 用户看到的"指针一靠近她就闪"。
+  //   所以窗口**永远保持可交互**，精确判定交给页面里的 hitTest（掩码）。
   const ig = of('ignoreMouse')
-  ok(ig.length > 0 && ig[0].on === true && ig[0].forward === true, '默认：整窗点击穿透 setIgnoreMouseEvents(true,{forward:true})', JSON.stringify(ig[0] || null))
+  ok(ig.length === 0, '不调 setIgnoreMouseEvents（切穿透会吃掉按下 + 触发整窗重合成导致闪）', JSON.stringify(ig))
   ok(!!(o.webPreferences && o.webPreferences.preload), '挂了 preload（她才能在壳里用收起/展开）', JSON.stringify(o.webPreferences && o.webPreferences.preload))
 }
 
@@ -229,9 +232,11 @@ console.log('\n--- 窗口成型（可选，默认关闭）：机制已接好但�
   ok(/function readShapeWindow\(\)/.test(shellSrc), '有 shapeWindow 开关（默认 false）', '')
   ok(/shapeWindow === true/.test(shellSrc), '开关默认关闭（必须显式写 true 才启用）', '')
   ok(fs.existsSync(path.join(SHELL, 'window-shape.cjs')), 'window-shape.cjs（CommonJS 版）在位', '')
-  // ⚠️ 这条是回退事故的守门员：默认（成型关）必须有上游那套穿透，否则矩形窗口会挡鼠标。
-  ok(/setInterval\(poll, 90\)/.test(shellSrc) && /async function poll\(\)/.test(shellSrc),
-    '默认机制（90ms 轮询 + 整窗穿透）必须保留 —— 删了会留下一个矩形窗口挡鼠标', '')
+  // 【守门员 · 已更新】旧机制（90ms 轮询 + setIgnoreMouseEvents 切换）**必须保持删除**：
+  //   真机日志证明它同时造成"按下被穿透吃掉"（只有 mouseup）与"整窗重合成导致闪"。
+  ok(!/setInterval\(poll, 90\)/.test(shellSrc) && !/async function poll\(\)/.test(shellSrc),
+    '旧的 90ms 命中轮询保持删除（它造成的闪与抓不住已由真机日志证伪）', '')
+  ok(!/function setIgnore\(/.test(shellSrc), 'setIgnore 及其调用保持删除', '')
 }
 
 console.log('\n--- 页面加载 ---')
@@ -295,18 +300,14 @@ console.log('\n--- 拖动：必须是 follow 语义（跟手），不是 push --
     'dragTimer 是 setTimeout 句柄，清理用 clearTimeout', '')
   ok(shellSrc.indexOf('const startedAt = Date.now()') < shellSrc.indexOf('const tick = () => {'),
     'startedAt 在 tick 之前声明（否则 TDZ 抛错，拖动完全失效）', '')
-  // 【真 bug 守门员】拖动期间**绝不能**切换穿透样式（WS_EX_TRANSPARENT / setIgnoreMouseEvents）：
-  // 拖动中窗口在飞，getBounds() 可能滞后一帧 → 指针"看起来在窗口外" → setIgnore(true)
-  // → 窗口收不到按钮消息 → 拖动当场断（外部评审清单里的第 4/6 条就是这个坑）。
+  // 【真 bug 守门员 · 已升级】原来的问题是"拖动期间不能切穿透"；现在更彻底：
+  // 整个切穿透机制都没了（poll + setIgnore 一起删除），所以只要断言它**不存在**即可 ——
+  // 这样"拖动中被切回穿透"这一类 bug 在结构上不可能再发生。
+  // 注意只看**代码行**：注释里会提到这些 API 名（说明为什么废弃）。
   {
-    const i = shellSrc.indexOf('async function poll()')
-    const seg = i >= 0 ? shellSrc.slice(i, i + 600) : ''
-    const guardLine = seg.split('\n').findIndex((l) => /if \(dragTimer\) return/.test(l))
-    const rectLine = seg.split('\n').findIndex((l) => /p\.x < b\.x/.test(l))
-    ok(guardLine > 0, 'poll() 里有拖动守卫', '')
-    ok(guardLine > 0 && rectLine > 0 && guardLine < rectLine,
-      '拖动守卫必须在"指针是否在窗口内"之前（否则拖动中会被切回穿透，拖动断掉）',
-      '守卫第 ' + guardLine + ' 行 / 矩形判断第 ' + rectLine + ' 行')
+    const codeOnly = shellSrc.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
+    ok(!/async function poll\(\)/.test(codeOnly) && !/setIgnoreMouseEvents\s*\(/.test(codeOnly) && !/function setIgnore\(/.test(codeOnly),
+      '切穿透机制整体不存在（拖动中不可能再被切回穿透）', '')
   }
 }
 

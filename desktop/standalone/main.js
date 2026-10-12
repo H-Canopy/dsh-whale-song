@@ -75,7 +75,6 @@ const TOKEN_FILE = path.join(os.homedir(), '.dsh', 'dsh-live2d-pet-desktop.json'
 let win = null
 let ballWin = null
 let tray = null
-let pollTimer = null
 let cursorFeed = null
 let lastCursor = null
 let dragTimer = null
@@ -131,39 +130,11 @@ const hitJS = (x, y) => `(function(){try{
   return 'none';
 }catch(e){return 'none'}})()`
 
-function setIgnore(on) {
-  if (!win || win.isDestroyed()) return
-  win.setIgnoreMouseEvents(on, { forward: true })
-}
 
-async function poll() {
-  // ⚠️ 拖动期间**一律不碰穿透样式**（WS_EX_TRANSPARENT / setIgnoreMouseEvents）：
-  //   拖动中窗口在飞，getBounds() 可能滞后一帧，指针会"看起来在窗口外"；
-  //   若这时切到穿透，窗口就收不到按钮消息 → 拖动当场断开（外部评审也点了这条）。
-  if (dragTimer) return
-  if (!win || win.isDestroyed() || !win.isVisible()) return
-  const p = screen.getCursorScreenPoint()
-  const b = win.getBounds()
-  if (p.x < b.x || p.x > b.x + b.width || p.y < b.y || p.y > b.y + b.height) {
-    lastHit = 'none'
-    setIgnore(true)
-    return
-  }
-  try {
-    const kind = await win.webContents.executeJavaScript(hitJS(Math.round(p.x - b.x), Math.round(p.y - b.y)))
-    lastHit = kind
-    overPanel = kind === 'panel'
-    setIgnore(kind === 'none')
-    // 拖动诊断：回答"为什么有时候抓不住她"。每 400ms 最多一行，很便宜。
-    const nowMs = Date.now()
-    if (nowMs - (globalThis.__dragDiagAt || 0) > 400) {
-      globalThis.__dragDiagAt = nowMs
-      bootLog('diag: cursor=' + p.x + ',' + p.y + ' local=' + Math.round(p.x - b.x) + ',' + Math.round(p.y - b.y) + ' hit=' + kind + ' ignore=' + (kind === 'none'))
-    }
-  } catch (e) {
-    setIgnore(true)
-  }
-}
+// —— 已删除：90ms 的"鼠标在不在她身上"轮询 + setIgnoreMouseEvents 切换 ——
+// 真机日志证据：只有 mouseup 没有 mousedown（按下被穿透吃掉）；
+// 且 ignore 反复翻转导致整窗重新合成 = 用户看到的"闪"。窗口现在**永远可交互**，
+// 精确判定交给页面里的 hitTest（掩码），它不需要切窗口样式。
 
 // ——————————————————————————————————————————————————————————————
 // 主窗口
@@ -218,7 +189,9 @@ function createMain() {
   // 「窗口成型」（settings.json: shapeWindow=true）是另一条路：把窗口裁成她的轮廓，
   // 轮廓之外根本不算窗口。两者**互斥**：成型开着时应改用下面这行注释掉的形式
   // （否则连她身上也点不到）；成型关着时必须保留整窗穿透，否则矩形窗口会挡住鼠标。
-  win.setIgnoreMouseEvents(true, { forward: true })
+  // 不调 setIgnoreMouseEvents：窗口永远可交互（理由见上面 poll/setIgnore 被删处）。
+  // 代价：窗口左上角那块空白会挡住鼠标（不再是穿透）；面板/菜单本来就要用那片区域，
+  // 真要收回来，走"面板向下弹 + SetWindowRgn 定型"，不要再回到轮询。
   win.setMenuBarVisibility(false)
 
   const wa = screen.getPrimaryDisplay().workArea
@@ -394,8 +367,6 @@ function createMain() {
       })
     } catch (e) {}
   }, 16)
-  pollTimer = setInterval(poll, 90)
-  bootLog('拖动脉冲轮询已启动（90ms）')
   win.once('ready-to-show', () => {
     bootLog('ready-to-show：窗口即将显示')
     bootLog('ready-to-show')
@@ -896,6 +867,5 @@ app.whenReady().then(async () => {
 })
 app.on('window-all-closed', () => app.quit())
 app.on('before-quit', () => {
-  clearInterval(pollTimer)
   clearTimeout(dragTimer)
 })
