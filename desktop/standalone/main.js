@@ -34,7 +34,7 @@ let petBase = CANDIDATE_BASES[0]
 function hostPref() {
   try {
     const p = path.join(app.getPath('userData'), 'settings.json')
-    const v = JSON.parse(fs.readFileSync(p, 'utf8')).hostPref
+    const v = JSON.parse(stripBom(fs.readFileSync(p, 'utf8'))).hostPref
     return v === 'desktop' || v === 'web' ? v : 'auto'
   } catch (e) {
     return 'auto'
@@ -149,17 +149,24 @@ const hitJS = (x, y) => `(function(){try{
  * 目前区域与她的实际渲染位置还有偏差（实测约 100px，会把她裁掉一大半），见 README。
  * 打开方式：%APPDATA%\DS-WhaleSong-Pet\settings.json 写 {"shapeWindow": true}。
  */
+/**
+ * 去掉 UTF-8 BOM。真机踩到：用 PowerShell 写的 settings.json 带 EF BB BF，
+ * JSON.parse 直接抛错、又被 catch 吞掉 → 开关静默失效（表现得像"开关不生效"）。
+ * 记事本等编辑器也可能写 BOM，所以解析前统一兜底。
+ */
+function stripBom(t) { return String(t).replace(/^\uFEFF/, '') }
+
 function readShapeWindow() {
   try {
     const p = path.join(app.getPath('userData'), 'settings.json')
-    return JSON.parse(fs.readFileSync(p, 'utf8')).shapeWindow === true
+    return JSON.parse(stripBom(fs.readFileSync(p, 'utf8'))).shapeWindow === true
   } catch (err) { return false }
 }
 
 function readFullscreenPrimary() {
   try {
     const p = path.join(app.getPath('userData'), 'settings.json')
-    return JSON.parse(fs.readFileSync(p, 'utf8')).fullscreenPrimary === true
+    return JSON.parse(stripBom(fs.readFileSync(p, 'utf8'))).fullscreenPrimary === true
   } catch (e) {
     return false
   }
