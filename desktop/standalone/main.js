@@ -288,7 +288,7 @@ function clampPet(x, y, w, h) {
     try {
       const cb = win.getBounds()
       const cc = clampPet(cb.x, cb.y, cb.width, cb.height)
-      if (cc.x !== cb.x || cc.y !== cb.y) { win.setBounds({ x: cc.x, y: cc.y, width: cb.width, height: cb.height }); bootLog("drag-start: 位置越界，已纠正 " + cb.x + "," + cb.y + " → " + cc.x + "," + cc.y) }
+      if (cc.x !== cb.x || cc.y !== cb.y) { const ex = cc.x - (cc.x % 2), ey = cc.y - (cc.y % 2); win.setBounds({ x: ex, y: ey, width: cb.width, height: cb.height }); bootLog("drag-start: 位置越界，已纠正 " + cb.x + "," + cb.y + " → " + ex + "," + ey) }
     } catch (err) {}
     clearTimeout(dragTimer)
       // —— 自校正循环（见上：Windows 计时器粒度 15.6ms 会把 setInterval(33) 拉成 46.8ms）——
@@ -310,8 +310,13 @@ function clampPet(x, y, w, h) {
           // ⚠️ 必须夹进工作区。真机日志：窗口被抓到 y=-50（顶部出屏）后，她在屏幕上被推到
           //   y≈1044（工作区只有 1019）→ **她整个掉到屏幕下方**，于是「怎么拖都不动」。
           //   夹取的目标是「让她本体完整留在工作区内」，细节见 clampPet()。
+          // 【位置量化】实测（_staging/probe-size-quant.mjs，60 步 × 4 组对照）：
+          //   位置原样 → 窗口宽高从 422 涨到 424；量化到 1.5 的倍数 → 仍涨 2px；
+          //   **只用 setPosition → 暴涨 60px（更糟）**；**量化到偶数 → Δ=0，60 步一次都没变**。
+          //   所以拖动位置取偶数（她画在右下角，2px 的整数步长看不出来），
+          //   这样窗口尺寸不再被系统"顺手"改 → 画布不再 resize → 闪的最后一环也断掉。
           const c = clampPet(wantX, wantY, dragFrom.w, dragFrom.h)
-          const x2 = c.x, y2 = c.y
+          const x2 = c.x - (c.x % 2), y2 = c.y - (c.y % 2)
           const t0 = Date.now()
           // 【尺寸防抖】实测（_staging/probe-size-creep.mjs）：透明窗口在 150% 缩放下，
           //   每次 setBounds 系统都可能"顺手"改尺寸（60 步涨 2px），尺寸一变画布就 resize

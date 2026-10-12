@@ -297,6 +297,10 @@ console.log('\n--- 拖动：必须是 follow 语义（跟手），不是 push --
   ok(/function clampPet\(x, y, w, h\)/.test(shellSrc) && /const minY = wa\.y - \(h - PET_BODY\.offB/.test(shellSrc),
     'clampPet() 按"她本体留在工作区内"夹取', '')
   ok(/const c = clampPet\(wantX, wantY, dragFrom\.w, dragFrom\.h\)/.test(shellSrc), '拖动循环用 clampPet', '')
+  // 实测（_staging/probe-size-quant.mjs，60 步 ×4 组）：位置原样→尺寸涨 2px；量化到 1.5 的倍数→仍涨 2px；
+  // 只用 setPosition→暴涨 60px；**量化到偶数→Δ=0**。所以拖动位置必须取偶数。
+  ok(/const x2 = c\.x - \(c\.x % 2\), y2 = c\.y - \(c\.y % 2\)/.test(shellSrc),
+    '拖动位置量化到偶数（实测只有这样窗口尺寸才不涨）', '')
   ok(/位置越界，已纠正/.test(shellSrc), '按下时立刻纠正越界位置（从出屏状态开始拖也能救回）', '')
   ok(/w: win\.getBounds\(\)\.width, h: win\.getBounds\(\)\.height/.test(shellSrc),
     'drag-start 时记下宽高', '')
