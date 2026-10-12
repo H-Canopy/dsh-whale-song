@@ -272,7 +272,13 @@ function createMain() {
     }
   }
 
+  ipcMain.on('dshw-diag', (_e, msg) => bootLog('preload: ' + msg))
   ipcMain.on('drag-start', async (_e, at) => {
+    // 入口诊断：能到这一行，说明按下事件到了页面（否则是页面压根没收到按钮事件）
+    try {
+      const b0 = win && win.isDestroyed() ? null : win.getBounds()
+      bootLog('drag-start: at=' + JSON.stringify(at) + ' win=' + (b0 ? b0.x + ',' + b0.y + ' ' + b0.width + 'x' + b0.height : 'null') + ' visible=' + (win && win.isVisible()))
+    } catch (err) {}
     // 小球用的是同一个 preload，也会发 drag-start；主窗口只是 hide() 没 destroy()，
     // 不加这条守卫就会把看不见的主窗口搬走（PR 反馈）
     if (!win || win.isDestroyed() || !win.isVisible()) return

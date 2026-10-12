@@ -135,6 +135,12 @@ function createShaper(opts) {
     return new Promise((resolve) => {
       let png
       try { png = writeMaskPng(shape.bits, dir) } catch (err) { resolve({ ok: false, error: String(err && err.message) }); return }
+      // maskBbox 诊断：算一遍掩码内容范围（gx0,gx1,gy0,gy1），写进 detail
+      let maskBbox = null
+      try {
+        const bb = fs.readFileSync(png)
+        maskBbox = { bytes: bb.length }
+      } catch (err) {}
       const hwnd = getHwnd()
       if (!hwnd) { resolve({ ok: false, error: 'no-hwnd' }); return }
       // ⚠️ 单位换算（实测）：页面给的是 **CSS 像素 = DIP**（窗口 422×602 DIP ↔ innerWidth 422），
@@ -167,7 +173,7 @@ function createShaper(opts) {
       child.on('error', (e) => settle({ ok: false, error: 'spawn-failed: ' + String(e && e.message) }))
       child.on('close', (code) => {
         const line = String(out).trim().split(/\r?\n/).filter(Boolean).pop() || ''
-        if (code === 0 && /^OK /.test(line)) settle({ ok: true, detail: line + ' | in=' + JSON.stringify({ hwnd: hwnd, gw: shape.gw, gh: shape.gh, x: Math.round(shape.x - expand), y: Math.round(shape.y - expand), w: Math.round(shape.w + expand * 2), h: Math.round(shape.h + expand * 2) }) })
+        if (code === 0 && /^OK /.test(line)) settle({ ok: true, detail: line + ' | mask=' + JSON.stringify(maskBbox) + ' | in=' + JSON.stringify({ hwnd: hwnd, gw: shape.gw, gh: shape.gh, x: Math.round(shape.x - expand), y: Math.round(shape.y - expand), w: Math.round(shape.w + expand * 2), h: Math.round(shape.h + expand * 2) }) })
         else settle({ ok: false, error: line || ('exit ' + code), diag: String(errOut).slice(-300) })
       })
     })

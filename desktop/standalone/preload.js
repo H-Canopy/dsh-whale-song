@@ -24,6 +24,15 @@ contextBridge.exposeInMainWorld('dshpetBridge', {
 
 // 拖动：页面里按下她 → 告诉主进程搬窗口（主进程只在鼠标确实压在她身上时才搬，
 // 压在面板上时放行给网页，所以设置里的滑块照样能拖）
+// 【诊断】把输入事件经 IPC 报给主进程（沙箱 preload 用不了 fs，所以不能自己写文件）。
+//   用来判断"按下到底有没有到达窗口"—— 主进程侧看不到这一点。
+//   本段由 make-standalone-shell.mjs 注入，改这里没用。
+function dshwDiag(msg) {
+  try { ipcRenderer.send('dshw-diag', String(msg)) } catch (e) {}
+}
+window.addEventListener('mousedown', function (e) { dshwDiag('mousedown btn=' + e.button + ' screen=' + e.screenX + ',' + e.screenY + ' client=' + e.clientX + ',' + e.clientY) }, true)
+window.addEventListener('mouseup', function () { dshwDiag('mouseup') }, true)
+dshwDiag('preload 已加载')
 window.addEventListener('mousedown', (e) => {
   if (e.button === 0) ipcRenderer.send('drag-start', { x: e.screenX, y: e.screenY })
 }, true)
