@@ -261,13 +261,17 @@ console.log('\n--- 拖动：必须是 follow 语义（跟手），不是 push --
   // 夹取/取整把窗口挪走之后 —— push 会把那次误差一直带着（越拖越偏、撞夹取就跳回），
   // follow 每帧按"当前窗口位置"重算，不累积。桩模拟不出"被夹取"，所以断言**公式本身**。
   const shellSrc = fs.readFileSync(path.join(SHELL, 'main.js'), 'utf8')
-  ok(/setPosition\(Math\.round\(p\.x - dragFrom\.grab\.x\), Math\.round\(p\.y - dragFrom\.grab\.y\)\)/.test(shellSrc),
+  ok(/const wantX = Math\.round\(p\.x - dragFrom\.grab\.x\)/.test(shellSrc) && /win\.setPosition\(wantX, wantY\)/.test(shellSrc),
     '拖动用的是 follow 公式：位置 = 指针 − 抓手偏移', '')
   ok(!/dragFrom\.win/.test(shellSrc),
     '拖动不再依赖"按下时的窗口位置"（push 的根源）', '')
   ok(!/p\.x - dragFrom\.mouse\.x/.test(shellSrc),
     '拖动不再用"指针相对按下点的位移"（那是不跟手的根源）', '')
   ok(/async function grabOffset\(\)/.test(shellSrc), '有 grabOffset()：按下时只算一次抓手偏移', '')
+  // 性能守门员（实测依据）：透明窗口 setPosition 6.5ms/次，16ms(60fps) 一帧必然积压 → 晃/闪。
+  ok(/\}, 33\)/.test(shellSrc), '拖动帧率是 30fps（33ms），不是 60fps —— 60fps 在这类机器上供不起', '')
+  ok(/wantX === dragFrom\.lastX && wantY === dragFrom\.lastY/.test(shellSrc),
+    '位置没变就不调 setPosition（省一半开销）', '')
 }
 
 console.log('\n--- 贴边小球（第二个透明窗口）---')
