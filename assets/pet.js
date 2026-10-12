@@ -2758,6 +2758,13 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
         // 点在鲸鱼娘身上：吃掉这次点击，别让下面的 DSH 界面也响应
         e.stopPropagation()
         e.preventDefault()
+        // 【鲸歌增量 ⑦】桌面壳里**不再进入"窗口内拖动"**：
+        // 壳（desktop/standalone）已把"抓她 = 搬窗口"接管了（preload 转发 drag-start，
+        // 主进程每 33ms 搬窗口）。若这里也进入 dragging，她会在**窗口内**跟着指针跑、还被夹在
+        // 窗口边界里 —— 于是"抓她形象"看起来无效（只是在框里挪），而"抓透明区"反而正常
+        // （那段逻辑不介入，窗口被搬走）。实测现象完全吻合。
+        // 注意：事件照旧吃掉（上面两行），只是不设 dragging。
+        if (window.__DSHPET_SHELL__) return
         dragging = true
         dragMoved = false
         delete root.dataset.edge // 一拖就离开墙，别再显示「贴着左边」
