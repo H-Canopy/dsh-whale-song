@@ -269,9 +269,18 @@ console.log('\n--- 拖动：必须是 follow 语义（跟手），不是 push --
     '拖动不再用"指针相对按下点的位移"（那是不跟手的根源）', '')
   ok(/async function grabOffset\(\)/.test(shellSrc), '有 grabOffset()：按下时只算一次抓手偏移', '')
   // 性能守门员（实测依据）：透明窗口 setPosition 6.5ms/次，16ms(60fps) 一帧必然积压 → 晃/闪。
-  ok(/\}, 33\)/.test(shellSrc), '拖动帧率是 30fps（33ms），不是 60fps —— 60fps 在这类机器上供不起', '')
+  ok(/\}, 33\)/.test(shellSrc) || /const STEP_MS = 33/.test(shellSrc), '拖动节拍目标是 33ms（30fps）', '')
   ok(/wantX === dragFrom\.lastX && wantY === dragFrom\.lastY/.test(shellSrc),
     '位置没变就不调 setPosition（省一半开销）', '')
+  // 【实测根因守门员】Windows 计时器粒度 15.6ms 会把 setInterval(33) 拉成 46.6ms（实测），
+  // 于是"30fps"实际只有 21fps —— 这就是闪帧的直接来源。必须用自校正 setTimeout。
+  ok(/自校正循环/.test(shellSrc) && /STEP_MS - \(now - startedAt\) % STEP_MS/.test(shellSrc),
+    '拖动循环是自校正 setTimeout（setInterval 会被系统粒度拉长 40%）', '')
+  ok(!/dragTimer = setInterval/.test(shellSrc), '不再用 setInterval 驱动拖动', '')
+  ok(!/clearInterval\(dragTimer\)/.test(shellSrc) && /clearTimeout\(dragTimer\)/.test(shellSrc),
+    'dragTimer 是 setTimeout 句柄，清理用 clearTimeout', '')
+  ok(shellSrc.indexOf('const startedAt = Date.now()') < shellSrc.indexOf('const tick = () => {'),
+    'startedAt 在 tick 之前声明（否则 TDZ 抛错，拖动完全失效）', '')
   // 【真 bug 守门员】拖动期间**绝不能**切换穿透样式（WS_EX_TRANSPARENT / setIgnoreMouseEvents）：
   // 拖动中窗口在飞，getBounds() 可能滞后一帧 → 指针"看起来在窗口外" → setIgnore(true)
   // → 窗口收不到按钮消息 → 拖动当场断（外部评审清单里的第 4/6 条就是这个坑）。
