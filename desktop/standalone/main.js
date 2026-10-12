@@ -265,7 +265,7 @@ function createMain() {
       )
       if (kind === 'panel') return // 真控件（滑块/按钮/输入框）→ 让给网页
     } catch (e) {}
-    dragFrom = { grab: await grabOffset(), n: 0, lastX: NaN, lastY: NaN, lastAt: 0, w: win.getBounds().width, h: win.getBounds().height }
+    dragFrom = { grab: await grabOffset(), n: 0, lastX: NaN, lastY: NaN, lastAt: 0, startedAt: Date.now(), w: win.getBounds().width, h: win.getBounds().height }
     clearTimeout(dragTimer)
       // —— 自校正循环（见上：Windows 计时器粒度 15.6ms 会把 setInterval(33) 拉成 46.8ms）——
       const STEP_MS = 33
@@ -297,13 +297,11 @@ function createMain() {
           const y2 = Math.max(minY, Math.min(maxY, wantY))
           const t0 = Date.now()
           // 【尺寸防抖】实测（_staging/probe-size-creep.mjs）：透明窗口在 150% 缩放下，
-          //   每次 setBounds（即使宽高传的是固定值）系统都会把尺寸"顺手"改 ±1px，60 步涨 2px；
-          //   尺寸一变画布就 resize（掩码重建 + 视觉跳），这就是残留的闪。
-          //   做法：位置用算出来的，宽高用**当前实际值**（不主动改尺寸）；若发现已被系统改动，
-          //   这一次就把宽高纠回按下时的值。
-          const cur = win.getBounds()
-          const fixW = cur.width !== dragFrom.w || cur.height !== dragFrom.h
-          win.setBounds({ x: x2, y: y2, width: fixW ? dragFrom.w : cur.width, height: fixW ? dragFrom.h : cur.height })
+          //   每次 setBounds 系统都可能"顺手"改尺寸（60 步涨 2px），尺寸一变画布就 resize
+          //   （掩码重建 + 视觉跳）= 残留的闪。
+          //   ⚠️ 这里**必须写死按下时的宽高**：早先试过"读当前值再原样传回"，结果系统的改动
+          //   会被当成新基准吃掉（27 次拖动涨了 16px）。写死后最坏每次只 ±1px，不累积。
+          win.setBounds({ x: x2, y: y2, width: dragFrom.w, height: dragFrom.h })
           const costMs = Date.now() - t0
           // 拖动轨迹诊断（只记前 80 帧）：want vs got 不一致 → 被挪走；宽高变化 → 闪的嫌疑
           try {
@@ -324,6 +322,13 @@ function createMain() {
     win.webContents.executeJavaScript("document.dispatchEvent(new PointerEvent('pointercancel',{bubbles:true}))").catch(() => {})
   })
   ipcMain.on('drag-end', () => {
+    // 拖动时长诊断（见上：用来区分「只是点了一下」和「拖动被打断」）
+    try {
+      if (dragFrom) {
+        const ms = Date.now() - (dragFrom.startedAt || Date.now())
+        bootLog('drag-end: 持续=' + ms + 'ms 帧数=' + (dragFrom.n || 0) + (ms < 150 ? '  <-- 松手过快(<150ms，看着就像没动)' : ''))
+      }
+    } catch (err) {}
     clearTimeout(dragTimer)
     dragTimer = null
     dragFrom = null

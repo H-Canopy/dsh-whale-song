@@ -287,10 +287,11 @@ console.log('\n--- 拖动：必须是 follow 语义（跟手），不是 push --
     ok(returns === 1, 'tick 里只有守卫那一处 return（实测 ' + returns + ' 处）', '')
   }
   // 150% 缩放下系统会在位置变化时顺手改尺寸（实测 60 步涨 2px，`probe-size-creep.mjs`）→
-  // 画布 resize → 闪。所以：位置用算出来的，宽高用当前值；发现被改了才纠正回来。
-  ok(/const fixW = cur\.width !== dragFrom\.w/.test(shellSrc), '拖动里有"尺寸防抖"（检测到系统改尺寸就纠回）', '')
-  ok(/win\.setBounds\(\{ x: x2, y: y2, width: fixW \? dragFrom\.w : cur\.width/.test(shellSrc),
-    '拖动只改位置、尺寸保持当前值（避免系统 1px 累积）', '')
+  // 画布 resize → 闪。所以**写死按下时的宽高**（试过"读当前值原样传回"，系统改动会被当成
+  // 新基准吃掉：真机 27 次拖动涨 16px）。
+  ok(/win\.setBounds\(\{ x: x2, y: y2, width: dragFrom\.w, height: dragFrom\.h \}\)/.test(shellSrc),
+    '拖动写死按下时的宽高（防系统改动累积）', '')
+  ok(/size=' \+ gb\.width/.test(shellSrc), '拖动轨迹记录尺寸（便于发现累积）', '')
   ok(/const minY = wa\.y - \(dragFrom\.h - bodyB - PAD\)/.test(shellSrc) && /const maxY = wa\.y \+ wa\.height - bodyB - PAD/.test(shellSrc),
     '拖动时夹进工作区，保证她本体留在屏幕内', '')
   ok(/w: win\.getBounds\(\)\.width, h: win\.getBounds\(\)\.height/.test(shellSrc),
