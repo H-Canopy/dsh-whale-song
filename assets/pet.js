@@ -4812,6 +4812,50 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     playMotion,
     hitTest,
     /**
+     * 命中掩码交给**宿主/壳**用（桌面壳据此把窗口裁成她的轮廓，见 desktop/standalone）。
+     * 为什么需要：桌面壳里"鼠标在不在她身上"应该是**窗口几何**（Win32 区域）决定的，
+     * 而不是靠定时轮询猜 —— 把这张已经在用的掩码交出去，壳就不用再算一份。
+     * 返回 null 表示还没有可用掩码（模型没加载完，或生成失败）——调用方应保持矩形窗口。
+     * @returns {null | { x:number, y:number, w:number, h:number, gw:number, gh:number, bits:string }}
+     *   x/y/w/h 是**窗口坐标系**（CSS 像素）下掩码覆盖的矩形；gw/gh 是网格尺寸；
+     *   bits 是 `data:image/png;base64,…` —— 一张 gw×gh 的位图，白 = 她，黑 = 空气。
+     *   用 PNG 而不是数组：结构化克隆 Uint8Array 也行，但位图更小且壳那边解码更省事。
+     */
+    maskInfo: () => {
+      try {
+        const stage = app && app.view && app.view.parentElement
+        if (!stage || !mask.grid || !mask.w || !mask.h) return null
+        const r = stage.getBoundingClientRect()
+        if (!r.width || !r.height) return null
+        // grid → PNG（1 字节/像素；用 canvas 直接画，避免手工拼 base64）
+        const cv = document.createElement('canvas')
+        cv.width = mask.w
+        cv.height = mask.h
+        const cx = cv.getContext('2d')
+        const img = cx.createImageData(mask.w, mask.h)
+        const d = img.data
+        for (let i = 0, n = mask.w * mask.h; i < n; i++) {
+          const on = mask.grid[i] ? 255 : 0
+          d[i * 4] = on
+          d[i * 4 + 1] = on
+          d[i * 4 + 2] = on
+          d[i * 4 + 3] = 255
+        }
+        cx.putImageData(img, 0, 0)
+        return {
+          x: Math.round(r.left),
+          y: Math.round(r.top),
+          w: Math.round(r.width),
+          h: Math.round(r.height),
+          gw: mask.w,
+          gh: mask.h,
+          bits: cv.toDataURL('image/png'),
+        }
+      } catch (err) {
+        return null
+      }
+    },
+    /**
      * 右键自检：读最近的右键链路记录（只在 URL 带 `?dshpDebug=1` 时有内容）。
      * 用法：DSHPet.rightDebug() 取数组；DSHPet.rightDebug(true) 顺便打到控制台。
      * 每条是一个 { t, step, data }，step 取值：contextmenu / miss / double / ctl。

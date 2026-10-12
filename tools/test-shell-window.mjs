@@ -212,9 +212,23 @@ console.log('\n--- 主窗口参数（透明 / 置顶 / 穿透 / 不进任务栏�
   ok(o.resizable === false && o.hasShadow === false, 'resizable:false + hasShadow:false', JSON.stringify({ r: o.resizable, s: o.hasShadow }))
   const top = of('alwaysOnTop')
   ok(top.length > 0 && top[0].v === true && top[0].level === 'screen-saver', '置顶：setAlwaysOnTop(true, "screen-saver")', JSON.stringify(top[0] || null))
+  // —— 穿透机制换代了：从"整窗穿透 + 90ms 轮询按需关掉"改成"窗口裁成她的轮廓" ——
+  // 旧机制的空窗就是"有时候抓不住她"的根因（见 desktop/standalone/window-shape.mjs 的说明）。
   const ig = of('ignoreMouse')
-  ok(ig.length > 0 && ig[0].on === true && ig[0].forward === true, '点击穿透：setIgnoreMouseEvents(true,{forward:true})', JSON.stringify(ig[0] || null))
+  ok(ig.length === 0, '不再整窗 setIgnoreMouseEvents（否则连她身上也点不到）', JSON.stringify(ig))
   ok(!!(o.webPreferences && o.webPreferences.preload), '挂了 preload（她才能在壳里用收起/展开）', JSON.stringify(o.webPreferences && o.webPreferences.preload))
+}
+
+console.log('\n--- 窗口成型：把"鼠标在不在她身上"交给窗口几何 ---')
+{
+  const shellSrc = fs.readFileSync(path.join(SHELL, 'main.js'), 'utf8')
+  const codeLines = shellSrc.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+  ok(codeLines.some((l) => /createShaper\(\{/.test(l)), '壳里建了成型器（createShaper）', '')
+  ok(codeLines.some((l) => /onShape:/.test(l)), '本地服务把 onShape 接给了成型器（页面可提交掩码）', '')
+  ok(codeLines.some((l) => /getNativeWindowHandle\(\)/.test(l)), '成型器每次现取 HWND（窗口重建后句柄会变）', '')
+  ok(!codeLines.some((l) => /setIgnoreMouseEvents\s*\(/.test(l)), '代码里没有 setIgnoreMouseEvents 调用（整窗穿透已废弃）', '')
+  ok(!/setInterval\(poll, 90\)/.test(shellSrc), '90ms 命中轮询已删除', '')
+  ok(fs.existsSync(path.join(SHELL, 'window-shape.cjs')), 'window-shape.cjs（CommonJS 版）在位', '')
 }
 
 console.log('\n--- 页面加载 ---')

@@ -28,5 +28,37 @@
 <script src="/dsh-pet/media-smtc.js"></script>
 <script src="/dsh-pet/media-local.js"></script>
 <script src="/dsh-pet/media-bridge.js"></script>
+<script>
+  // —— 窗口成型：把命中掩码交给壳，让窗口裁成她的轮廓 ——
+  // 这样"鼠标在不在她身上"由**窗口几何**决定：轮廓外根本不算窗口（点击直接落到下面的窗口），
+  // 轮廓内永远可点 —— 取代了以前那套 90ms 轮询 + setIgnoreMouseEvents（会漏掉快速按下，
+  // 也就是"有时候抓不住她"）。接口只由 desktop/standalone/server.mjs 提供。
+  (function () {
+    var lastKey = ''
+    var stopped = false
+    function tick() {
+      if (stopped || !window.DSHPet || typeof window.DSHPet.maskInfo !== 'function') return
+      var m = null
+      try { m = window.DSHPet.maskInfo() } catch (e) { m = null }
+      if (!m || !m.bits) return
+      var key = [m.gw, m.gh, m.x, m.y, m.w, m.h, m.bits.length].join(',')
+      if (key === lastKey) return
+      lastKey = key
+      try {
+        fetch('/dsh-pet/shape', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(m),
+        }).then(function (r) { return r.json() }).then(function (j) {
+          // 壳不支持（比如在纯浏览器里打开）就停掉，不再打扰
+          if (j && j.ok === false && j.error === 'unsupported') stopped = true
+        }).catch(function () { lastKey = '' })
+      } catch (e) { lastKey = '' }
+    }
+    setTimeout(tick, 1200)
+    setInterval(tick, 1500)
+  })()
+</script>
 </body>
 </html>

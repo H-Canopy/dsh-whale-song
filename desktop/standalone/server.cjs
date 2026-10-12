@@ -123,6 +123,11 @@ function startPetServer(opts) {
   const shellDir = path.join(repoRoot, 'desktop', 'standalone')
   const config = readDefaultConfig(repoRoot)
   const media = createMediaBridge()
+  /**
+   * 窗口成型的回调（由壳注入）。页面 POST /dsh-pet/shape 时调用。
+   * 纯 Node 测试时不给 —— 那时接口返回 { ok:false, error:'unsupported' }，不影响其它功能。
+   */
+  const shape = typeof o.onShape === 'function' ? o.onShape : async () => ({ ok: false, error: 'unsupported' })
 
   function serveFile(res, abs, cache) {
     let buf = null
@@ -210,6 +215,22 @@ function startPetServer(opts) {
         const abs = path.resolve(assetsDir, rel)
         if (abs !== assetsDir && !abs.startsWith(assetsDir + path.sep)) { res.writeHead(403).end(); return }
         serveFile(res, abs, 'no-cache')
+        return
+      }
+
+      // —— 窗口成型（Win32 区域）：页面把命中掩码 POST 上来，壳据此把窗口裁成她的轮廓 ——
+      // 于是"鼠标在不在她身上"由**窗口几何**决定，不再靠 90ms 轮询猜（那套已删除）。
+      if (p === '/dsh-pet/shape') {
+        if (req.method !== 'POST') { json(res, 405, { ok: false, error: 'method-not-allowed' }); return }
+        let body = null
+        try { body = JSON.parse((await readBody(req, 2 * 1024 * 1024)) || 'null') } catch (err) {}
+        if (!body) { json(res, 200, { ok: false, error: 'bad-body' }); return }
+        try {
+          const r = await shape(body)
+          json(res, 200, r || { ok: true })
+        } catch (err) {
+          json(res, 200, { ok: false, error: String((err && err.message) || err) })
+        }
         return
       }
 

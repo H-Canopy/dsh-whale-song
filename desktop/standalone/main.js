@@ -12,6 +12,7 @@
 // 另外按主人要求做了「联动」：第一次打开时如果检测不到插件，会直接给一个
 // 「一键安装插件」按钮，替你跑 dsh plugin --profile web add github:...，
 // 所以 Windows 用户不需要自己开命令行。
+const { createShaper } = require('./window-shape.cjs')
 const { app, BrowserWindow, Tray, Menu, screen, shell, session, ipcMain, nativeImage, dialog } = require('electron')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -74,7 +75,6 @@ const TOKEN_FILE = path.join(os.homedir(), '.dsh', 'dsh-live2d-pet-desktop.json'
 let win = null
 let ballWin = null
 let tray = null
-let pollTimer = null
 let cursorFeed = null
 let lastCursor = null
 let dragTimer = null
@@ -130,36 +130,10 @@ const hitJS = (x, y) => `(function(){try{
   return 'none';
 }catch(e){return 'none'}})()`
 
-function setIgnore(on) {
-  if (!win || win.isDestroyed()) return
-  win.setIgnoreMouseEvents(on, { forward: true })
-}
 
-async function poll() {
-  if (!win || win.isDestroyed() || !win.isVisible()) return
-  const p = screen.getCursorScreenPoint()
-  const b = win.getBounds()
-  if (p.x < b.x || p.x > b.x + b.width || p.y < b.y || p.y > b.y + b.height) {
-    lastHit = 'none'
-    setIgnore(true)
-    return
-  }
-  if (dragTimer) return // 拖动中不抢事件（否则鼠标一离开她就变穿透，拖动会断）
-  try {
-    const kind = await win.webContents.executeJavaScript(hitJS(Math.round(p.x - b.x), Math.round(p.y - b.y)))
-    lastHit = kind
-    overPanel = kind === 'panel'
-    setIgnore(kind === 'none')
-    // 拖动诊断：回答"为什么有时候抓不住她"。每 400ms 最多一行，很便宜。
-    const nowMs = Date.now()
-    if (nowMs - (globalThis.__dragDiagAt || 0) > 400) {
-      globalThis.__dragDiagAt = nowMs
-      bootLog('diag: cursor=' + p.x + ',' + p.y + ' local=' + Math.round(p.x - b.x) + ',' + Math.round(p.y - b.y) + ' hit=' + kind + ' ignore=' + (kind === 'none'))
-    }
-  } catch (e) {
-    setIgnore(true)
-  }
-}
+// —— 已删除：90ms 的"鼠标在不在她身上"轮询 + setIgnoreMouseEvents ——
+// 现在这件事由**窗口形状**决定（petShaper / window-shape.mjs）：她的轮廓之外根本不算窗口，
+// 鼠标事件由操作系统直接交给下面的窗口；轮廓之内则**永远**可点，没有"还没轮到轮询就被按掉"的空窗。
 
 // ——————————————————————————————————————————————————————————————
 // 主窗口
@@ -169,6 +143,18 @@ async function poll() {
  *  打开方式：在 userData 目录（Windows 通常是 %APPDATA%\DS-WhaleGirl-Pet）的
  *  settings.json 里写 {"fullscreenPrimary": true}。开启后窗口覆盖主屏工作区，
  *  空白处照旧点击穿透（setIgnoreMouseEvents 逻辑不变），于是「她在哪」不再受窗口边界约束。 */
+/**
+ * 是否启用「窗口成型」（把窗口裁成她的轮廓）。**默认关闭**：
+ * 目前区域与她的实际渲染位置还有偏差（实测约 100px，会把她裁掉一大半），见 README。
+ * 打开方式：%APPDATA%\DS-WhaleSong-Pet\settings.json 写 {"shapeWindow": true}。
+ */
+function readShapeWindow() {
+  try {
+    const p = path.join(app.getPath('userData'), 'settings.json')
+    return JSON.parse(fs.readFileSync(p, 'utf8')).shapeWindow === true
+  } catch (err) { return false }
+}
+
 function readFullscreenPrimary() {
   try {
     const p = path.join(app.getPath('userData'), 'settings.json')
@@ -198,7 +184,10 @@ function createMain() {
     },
   })
   win.setAlwaysOnTop(true, 'screen-saver')
-  win.setIgnoreMouseEvents(true, { forward: true })
+  // 注意：**不要**在这里调 setIgnoreMouseEvents(true)。
+  // 上游是"矩形窗口 + 整窗穿透 + 轮询按需关掉"；我们现在靠**窗口形状**（Win32 区域）实现同样的效果：
+  // 她的轮廓之外根本不算窗口，鼠标事件由系统直接交给下面的窗口 —— 所以整窗穿透这句必须去掉，
+  // 否则连她身上也点不到。
   win.setMenuBarVisibility(false)
 
   const wa = screen.getPrimaryDisplay().workArea
@@ -336,8 +325,6 @@ function createMain() {
       })
     } catch (e) {}
   }, 16)
-  pollTimer = setInterval(poll, 90)
-  bootLog('拖动脉冲轮询已启动（90ms）')
   // 心跳：每 2 秒记一次「指针 vs 窗口」，用来确认坐标系（曾怀疑 DIP/物理混用）
   setInterval(() => {
     try {
@@ -435,11 +422,38 @@ async function discoverHost(token) {
 
 // —— 独立模式改动 ①：本地迷你服务（静态资源 + SMTC），壳不再依赖 DSH ——
 let petServer = null
+let petShaper = null
 async function startLocalServer() {
+  // 窗口成型器：页面会把命中掩码 POST 上来，据此把窗口裁成她的轮廓。
+  // getHwnd **每次现取**：窗口重建后句柄会变。
+  if (!petShaper) {
+    petShaper = createShaper({
+      getHwnd: () => {
+        try {
+          if (!win || win.isDestroyed()) return null
+          const buf = win.getNativeWindowHandle()
+          return buf.length >= 8 ? Number(buf.readBigUInt64LE(0)) : Number(buf.readUInt32LE(0))
+        } catch (err) { return null }
+      },
+      // 阴影/光晕在掩码之外，往外交替膨胀几像素，免得被区域切掉（真机对比后再调）
+      expand: 6,
+      // 关键单位换算（实测）：页面给的是 CSS 像素 = DIP，而 SetWindowRgn 收**物理像素**。
+      // 150% 缩放时不做这步，区域会小 1/1.5 倍并被推到窗口外（实测区域 = 期望 × 0.667）。
+      getScale: () => {
+        try {
+          const b = win.getBounds()
+          const d = screen.getDisplayNearestPoint({ x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) })
+          return (d && d.scaleFactor) || 1
+        } catch (err) { return 1 }
+      },
+      log: (m) => bootLog(m),
+    })
+  }
+  const shaper = petShaper
   if (petServer) return petServer
   try {
     const mod = require('./server.cjs')
-    petServer = await mod.startPetServer({ extra: process.resourcesPath ? path.join(process.resourcesPath, 'dsh-whale-song') : '' })
+    petServer = await mod.startPetServer({ onShape: (shape) => { if (readShapeWindow()) return shaper.submit(shape); return { ok: false, error: 'disabled' } }, extra: process.resourcesPath ? path.join(process.resourcesPath, 'dsh-whale-song') : '' })
     bootLog('本地服务已起: ' + petServer.url + ' (root=' + petServer.repoRoot + ')')
     return petServer
   } catch (err) {
@@ -819,6 +833,5 @@ app.whenReady().then(async () => {
 })
 app.on('window-all-closed', () => app.quit())
 app.on('before-quit', () => {
-  clearInterval(pollTimer)
   clearInterval(dragTimer)
 })
