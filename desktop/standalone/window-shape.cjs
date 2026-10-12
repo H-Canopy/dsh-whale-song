@@ -16,7 +16,7 @@
 // ============================================================================
 'use strict'
 // ⚠️ 生成物：由 window-shape.mjs 机械转换而来（理由见那个文件头）。
-// 要改逻辑请改 .mjs，然后重新生成：node D:\Bigfish\_staging\make-shell-cjs-shape.mjs
+// 要改逻辑请改 .mjs，然后重新生成：node tools/shell-gen/make-shell-cjs-shape.mjs
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')

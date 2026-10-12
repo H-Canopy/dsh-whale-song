@@ -21,7 +21,7 @@
 // ============================================================================
 'use strict'
 // ⚠️ 生成物：由 desktop/standalone/server.mjs 机械转换而来（理由见那边文件头注释）。
-// 要改逻辑请改 .mjs，然后重新生成：node D:\Bigfish\_staging\make-shell-cjs-server.mjs
+// 要改逻辑请改 .mjs，然后重新生成：node tools/shell-gen/make-shell-cjs-server.mjs
 const fs = require('node:fs')
 const http = require('node:http')
 const path = require('node:path')

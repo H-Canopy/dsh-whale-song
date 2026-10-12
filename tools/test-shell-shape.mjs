@@ -168,6 +168,51 @@ ok(/getScale: \(\) => \{/.test(shellSrc) && /scaleFactor/.test(shellSrc),
 ok(/const S = \(n\) => Math\.round\(n \* sc\)/.test(shaperSrc),
   'window-shape：区域坐标按 scale 换算成物理像素')
 
+// ⑥ 【生成物必须在仓库里能找到生成器】
+//   历史：main.js / preload.js / *.cjs 都是生成的，但生成器只存在于作者机器的
+//   D:\Bigfish\_staging\（不在仓库里）—— 于是 clone 下来的人拿到的是一堆
+//   "改了会被覆盖、却找不到生成器"的黑盒。现在生成器进了 tools/shell-gen/。
+{
+  const genDir = path.join(HERE, '..', 'tools', 'shell-gen')
+  const need = [
+    'make-standalone-shell.mjs',    // → desktop/standalone/main.js + preload.js
+    'make-shell-cjs-shape.mjs',     // → window-shape.cjs
+    'make-shell-cjs-server.mjs',    // → server.cjs
+    'make-shell-cjs-bridge.mjs',    // → media-bridge.cjs
+  ]
+  ok(need.every((f) => fs.existsSync(path.join(genDir, f))),
+    '生成器都在仓库里（tools/shell-gen/）—— 否则生成物就是改不了的黑盒', '')
+  const genBad = need
+    .map((f) => [f, fs.readFileSync(path.join(genDir, f), 'utf8')])
+    .filter(([, src]) => /D:[\\/]Plugins[\\/]dsh-whale-song/.test(src))
+    .map(([f]) => f)
+  ok(genBad.length === 0, '生成器不写死绝对路径（clone 到别的机器也能跑）', genBad.join(','))
+  // 探针也在仓库里（排查窗口/成型问题时离不开）
+  const probeDir = path.join(HERE, '..', 'tools', 'probe')
+  const probes = fs.existsSync(probeDir)
+    ? fs.readdirSync(probeDir).filter((f) => f.endsWith('.ps1'))
+    : []
+  ok(probes.length >= 5, '排查探针在仓库里（tools/probe/，实测 ' + probes.length + ' 个）', '')
+  // ① 编码：非 ASCII 的 .ps1 **必须带 UTF-8 BOM**。
+  //    PS 5.1 把无 BOM 的 UTF-8 当 ANSI 读 → 中文会把引号吃掉 → 语法错误。真踩过。
+  const noBom = probes.filter((f) => {
+    const b = fs.readFileSync(path.join(probeDir, f))
+    const nonAscii = b.some((x) => x > 127)
+    const bom = b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf
+    return nonAscii && !bom
+  })
+  ok(noBom.length === 0, '含中文的探针都带 UTF-8 BOM（否则 PS 5.1 读出乱码 + 语法错）', noBom.join(','))
+  // ② DPI 感知：**读区域/窗口坐标**的探针必须自己声明感知，否则读到的是逻辑坐标，
+  //    会把一个正确的区域误报成"缩小了 0.667 倍"（这个幻觉害我绕了好几轮）。
+  //    probe-rgn-cal.ps1 是**故意**不声明的（它量的就是 unaware 场景），
+  //    probe-ps-dpi.ps1 量的就是"默认感知级别"，同理豁免。
+  const mustBeAware = ['probe-rgn-exact.ps1', 'probe-rgn-cal-aware.ps1', 'list-windows.ps1', 'probe-cursor.ps1']
+  const notAware = mustBeAware
+    .filter((f) => probes.includes(f))
+    .filter((f) => !/SetProcessDpiAwarenessContext/.test(fs.readFileSync(path.join(probeDir, f), 'utf8')))
+  ok(notAware.length === 0, '读窗口/区域坐标的探针都声明了 DPI 感知', notAware.join(','))
+}
+
 console.log('\n--- 尺寸稳定性（真机教训） ---')
 // 真机：窗口尺寸在多次拖动间累积增长（50 次 422→440）。实测 4 组对照后确定：
 // 拖动位置量化到**偶数**才不涨（量化到 1.5 的倍数仍涨 2px；只用 setPosition 会暴涨 60px）。

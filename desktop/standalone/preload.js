@@ -40,10 +40,14 @@ dshwDiag('preload 已加载')
 //   并在最后用同一件事把老监听「吃掉」，否则同一次按下会发两条 drag-start。
 var dshwDown = null
 var dshwLast = { x: 0, y: 0 }
+var dshwN = 0
+var dshwMovedMs = 0
 window.addEventListener('mousedown', function (e) {
   if (e.button !== 0) return
   dshwDown = { x: e.screenX, y: e.screenY }
   dshwLast = { x: 0, y: 0 }
+  dshwN = 0
+  dshwMovedMs = Date.now()
   ipcRenderer.send('drag-start', { x: e.screenX, y: e.screenY, clientX: e.clientX, clientY: e.clientY })
 }, true)
 window.addEventListener('mousemove', function (e) {
@@ -53,11 +57,17 @@ window.addEventListener('mousemove', function (e) {
   var dy = e.screenY - dshwDown.y
   if (dx === dshwLast.x && dy === dshwLast.y) return
   dshwLast = { x: dx, y: dy }
+  dshwN++
   ipcRenderer.send('drag-move', { dx: dx, dy: dy })
 }, true)
 window.addEventListener('mouseup', function () {
   if (!dshwDown) return
   dshwDown = null
+  // 【诊断】按下期间到底收到几次移动事件。区分两种"拖不动"：
+  //   0 次 = 移动事件根本没进来（窗口没收到）；>0 次 = 事件的到了，问题在应用位移那一步。
+  dshwDiag('拖放: 按下 ' + Math.round(dshwMovedMs || 0) + 'ms 内收到 ' + dshwN + ' 次移动')
+  dshwN = 0
+  dshwMovedMs = 0
   ipcRenderer.send('drag-end')
 }, true)
 
