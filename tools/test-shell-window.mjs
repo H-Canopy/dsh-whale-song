@@ -261,7 +261,7 @@ console.log('\n--- 拖动：必须是 follow 语义（跟手），不是 push --
   // 夹取/取整把窗口挪走之后 —— push 会把那次误差一直带着（越拖越偏、撞夹取就跳回），
   // follow 每帧按"当前窗口位置"重算，不累积。桩模拟不出"被夹取"，所以断言**公式本身**。
   const shellSrc = fs.readFileSync(path.join(SHELL, 'main.js'), 'utf8')
-  ok(/const wantX = Math\.round\(p\.x - dragFrom\.grab\.x\)/.test(shellSrc) && /win\.setPosition\(wantX, wantY\)/.test(shellSrc),
+  ok(/const wantX = Math\.round\(p\.x - dragFrom\.grab\.x\)/.test(shellSrc) && /win\.setBounds\(\{ x: wantX, y: wantY/.test(shellSrc),
     '拖动用的是 follow 公式：位置 = 指针 − 抓手偏移', '')
   ok(!/dragFrom\.win/.test(shellSrc),
     '拖动不再依赖"按下时的窗口位置"（push 的根源）', '')
@@ -270,8 +270,22 @@ console.log('\n--- 拖动：必须是 follow 语义（跟手），不是 push --
   ok(/async function grabOffset\(\)/.test(shellSrc), '有 grabOffset()：按下时只算一次抓手偏移', '')
   // 性能守门员（实测依据）：透明窗口 setPosition 6.5ms/次，16ms(60fps) 一帧必然积压 → 晃/闪。
   ok(/\}, 33\)/.test(shellSrc) || /const STEP_MS = 33/.test(shellSrc), '拖动节拍目标是 33ms（30fps）', '')
-  ok(/wantX === dragFrom\.lastX && wantY === dragFrom\.lastY/.test(shellSrc),
-    '位置没变就不调 setPosition（省一半开销）', '')
+  // 【外部评审抓到的 bug 守门员】自校正循环里"位置没变"绝不能写成 `return`
+  // （调度在函数末尾，return 会让循环再也不会被调度 → 拖动永久冻住）。
+  ok(/if \(wantX !== dragFrom\.lastX \|\| wantY !== dragFrom\.lastY\) \{/.test(shellSrc),
+    '"位置没变就不搬"写成了条件块（不是 return —— 那会让循环自杀）', '')
+  {
+    const i = shellSrc.indexOf('const tick = () => {')
+    const j = shellSrc.indexOf('dragTimer = setTimeout(tick', i)
+    const body = shellSrc.slice(i, j).split(/\r?\n/).filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
+    const returns = (body.match(/\breturn\b/g) || []).length
+    ok(returns === 1, 'tick 里只有守卫那一处 return（实测 ' + returns + ' 处）', '')
+  }
+  // 150% 缩放下 setPosition 有把尺寸改 ±1px 的毛病（画布 resize → 闪）→ 拖动必须固定宽高
+  ok(/win\.setBounds\(\{ x: wantX, y: wantY, width: dragFrom\.w, height: dragFrom\.h \}\)/.test(shellSrc),
+    '拖动用 setBounds 固定按下时的宽高（避免尺寸抖动导致闪）', '')
+  ok(/w: win\.getBounds\(\)\.width, h: win\.getBounds\(\)\.height/.test(shellSrc),
+    'drag-start 时记下宽高', '')
   // 【实测根因守门员】Windows 计时器粒度 15.6ms 会把 setInterval(33) 拉成 46.6ms（实测），
   // 于是"30fps"实际只有 21fps —— 这就是闪帧的直接来源。必须用自校正 setTimeout。
   ok(/自校正循环/.test(shellSrc) && /STEP_MS - \(now - startedAt\) % STEP_MS/.test(shellSrc),

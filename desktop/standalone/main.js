@@ -286,7 +286,7 @@ function createMain() {
       )
       if (kind === 'panel') return // 真控件（滑块/按钮/输入框）→ 让给网页
     } catch (e) {}
-    dragFrom = { grab: await grabOffset(), n: 0, lastX: NaN, lastY: NaN, lastAt: 0 }
+    dragFrom = { grab: await grabOffset(), n: 0, lastX: NaN, lastY: NaN, lastAt: 0, w: win.getBounds().width, h: win.getBounds().height }
     clearTimeout(dragTimer)
       // —— 自校正循环（见上：Windows 计时器粒度 15.6ms 会把 setInterval(33) 拉成 46.8ms）——
       const STEP_MS = 33
@@ -294,35 +294,33 @@ function createMain() {
       // 表现是"拖动完全没反应"）。
       const startedAt = Date.now()
       const tick = () => {
-        if (!dragFrom || !win) { dragTimer = null; return }
-        if (!dragFrom || !win) return
+        if (!dragFrom || !win || win.isDestroyed()) { dragTimer = null; return }
         const p = screen.getCursorScreenPoint()
         const wantX = Math.round(p.x - dragFrom.grab.x)
-              const wantY = Math.round(p.y - dragFrom.grab.y)
-              // ⚠️ 性能（实测这台机器）：**透明窗口**的 setPosition 要 6.5ms（不透明只要 2.9ms）；
-              //   而原来这里是 16ms 一帧（60fps）→ 实测 60 帧拖了 1680ms（理想 960ms，超支 75%），
-              //   帧持续积压 = 用户看到的"晃 / 闪 / 轨迹不稳"。所以：
-              //   ① 位置没变就不调（省一半：3.1ms/次）；
-              //   ② 帧率降到 30fps（33ms）—— 60fps 在这台机器上根本供不起。
-              if (wantX === dragFrom.lastX && wantY === dragFrom.lastY) return
-              dragFrom.lastX = wantX
-              dragFrom.lastY = wantY
-              const t0 = Date.now()
-              win.setPosition(wantX, wantY)
-              const costMs = Date.now() - t0
-              // 拖动轨迹诊断（只记前 80 帧）：
-              //   want vs got 不一致 → 有东西把窗口挪回去了（夹取/系统限制）
-              //   cost 大 / gap 大    → 主进程供不起这个帧率（就是"晃/闪"的来源）
-              try {
-                if (dragFrom.n < 80) {
-                  dragFrom.n++
-                  const got = win.getPosition()
-                  const now = Date.now()
-                  const gap = dragFrom.lastAt ? now - dragFrom.lastAt : 0
-                  dragFrom.lastAt = now
-                  bootLog('drag: cur=' + p.x + ',' + p.y + ' want=' + wantX + ',' + wantY + ' got=' + got[0] + ',' + got[1] + ' cost=' + costMs + 'ms gap=' + gap + 'ms' + (got[0] !== wantX || got[1] !== wantY ? ' <-- 被挪走' : ''))
-                }
-              } catch (err) {}
+        const wantY = Math.round(p.y - dragFrom.grab.y)
+        // ⚠️ 这里**绝不能 return**：调度在函数末尾，一旦 return 循环就永久停了
+        //   （外部评审抓到的 bug：刚按下/慢速微调/中途停一下 → 拖动冻死）。
+        //   所以去重是条件块，跳过这一帧的"搬窗口"，但照常调度下一帧。
+        if (wantX !== dragFrom.lastX || wantY !== dragFrom.lastY) {
+          dragFrom.lastX = wantX
+          dragFrom.lastY = wantY
+          const t0 = Date.now()
+          // 用 setBounds 并**固定按下时的宽高**：150% 缩放下 setPosition 有把尺寸改 ±1px 的
+          // 已知毛病，尺寸一变画布 resize → 视觉上就是闪。
+          win.setBounds({ x: wantX, y: wantY, width: dragFrom.w, height: dragFrom.h })
+          const costMs = Date.now() - t0
+          // 拖动轨迹诊断（只记前 80 帧）：want vs got 不一致 → 被挪走；宽高变化 → 闪的嫌疑
+          try {
+            if (dragFrom.n < 80) {
+              dragFrom.n++
+              const gb = win.getBounds()
+              const now = Date.now()
+              const gap = dragFrom.lastAt ? now - dragFrom.lastAt : 0
+              dragFrom.lastAt = now
+              bootLog('drag: cur=' + p.x + ',' + p.y + ' want=' + wantX + ',' + wantY + ' got=' + gb.x + ',' + gb.y + ' size=' + gb.width + 'x' + gb.height + ' cost=' + costMs + 'ms gap=' + gap + 'ms' + (gb.x !== wantX || gb.y !== wantY ? ' <-- 被挪走' : '') + (gb.width !== dragFrom.w || gb.height !== dragFrom.h ? ' <-- 宽高变了！' : ''))
+            }
+          } catch (err) {}
+        }
         const now = Date.now()
         dragTimer = setTimeout(tick, Math.max(0, STEP_MS - (now - startedAt) % STEP_MS))
       }
