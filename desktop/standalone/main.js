@@ -296,9 +296,14 @@ function createMain() {
           const x2 = Math.max(minX, Math.min(maxX, wantX))
           const y2 = Math.max(minY, Math.min(maxY, wantY))
           const t0 = Date.now()
-          // 用 setBounds 并**固定按下时的宽高**：150% 缩放下 setPosition 有把尺寸改 ±1px 的
-          // 已知毛病，尺寸一变画布 resize → 视觉上就是闪。
-          win.setBounds({ x: x2, y: y2, width: dragFrom.w, height: dragFrom.h })
+          // 【尺寸防抖】实测（_staging/probe-size-creep.mjs）：透明窗口在 150% 缩放下，
+          //   每次 setBounds（即使宽高传的是固定值）系统都会把尺寸"顺手"改 ±1px，60 步涨 2px；
+          //   尺寸一变画布就 resize（掩码重建 + 视觉跳），这就是残留的闪。
+          //   做法：位置用算出来的，宽高用**当前实际值**（不主动改尺寸）；若发现已被系统改动，
+          //   这一次就把宽高纠回按下时的值。
+          const cur = win.getBounds()
+          const fixW = cur.width !== dragFrom.w || cur.height !== dragFrom.h
+          win.setBounds({ x: x2, y: y2, width: fixW ? dragFrom.w : cur.width, height: fixW ? dragFrom.h : cur.height })
           const costMs = Date.now() - t0
           // 拖动轨迹诊断（只记前 80 帧）：want vs got 不一致 → 被挪走；宽高变化 → 闪的嫌疑
           try {
