@@ -4837,6 +4837,17 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     playMotion,
     hitTest,
     /**
+     * 只读拿到命中掩码的**原始网格**（调试用：把它打出来和画面对齐比较）。
+     * 壳那边判断"按在她身上没有"全靠这张掩码，一旦它和实际渲染错位，
+     * 就必须能直接看见它长什么样，而不是靠坐标反推。
+     */
+    maskGrid: () => {
+      try {
+        if (!mask.grid || !mask.w || !mask.h) return null
+        return { w: mask.w, h: mask.h, grid: Array.from(mask.grid) }
+      } catch (err) { return null }
+    },
+    /**
      * 命中掩码交给**宿主/壳**用（桌面壳据此把窗口裁成她的轮廓，见 desktop/standalone）。
      * 为什么需要：桌面壳里"鼠标在不在她身上"应该是**窗口几何**（Win32 区域）决定的，
      * 而不是靠定时轮询猜 —— 把这张已经在用的掩码交出去，壳就不用再算一份。

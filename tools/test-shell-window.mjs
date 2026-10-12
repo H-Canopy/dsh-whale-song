@@ -307,6 +307,15 @@ console.log('\n--- 拖动：必须是 follow 语义（跟手），不是 push --
   // ⑤ 累加不会被夹取"吃掉"：基准点要跟着实际生效位置走
   ok(/const appliedX = x2 - dragFrom\.cx/.test(shellSrc) && /dragFrom\.pendDx -= appliedX/.test(shellSrc),
     '夹取吃掉的位移会从待处理量里扣掉（贴边不积压）', '')
+  // ⑥ 【真 bug 守门员】掩码只覆盖画布约 78%×79%，她裙摆/头/脚这些地方会被判成"空气"
+  //    → 主人点她身上却拖不动。修法是把测试点朝掩码中心收缩（等价于放大掩码），
+  //    单靠"往外试固定半径"实测无效（在她较窄的高度上补不到左侧）。
+  ok(/PET_GRAB_ZOOM/.test(shellSrc) && /for\(var step=1;step<=4;step\+\+\)/.test(shellSrc),
+    '抓取命中按比例放大（掩码边缘之外也能抓住她，否则点她身上会拖不动）', '')
+  ok(!/PET_GRAB_RADIUS/.test(shellSrc),
+    '不再用"固定半径往外试"那套（实测补不到她较窄的高度）', '')
+  // 命中自检：没有它，下次再出"点她拖不动"只能靠猜
+  ok(/命中自检: stage=/.test(shellSrc), '保留命中自检（严格 vs 放大 对比 + 掩码字符图）', '')
   ok(!/dragTimer = setInterval/.test(shellSrc), '不再用 setInterval 驱动拖动', '')
   ok(!/clearInterval\(dragTimer\)/.test(shellSrc) && /clearTimeout\(dragTimer\)/.test(shellSrc),
     'dragTimer 是 setTimeout 句柄，清理用 clearTimeout', '')

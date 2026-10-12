@@ -119,11 +119,32 @@ async function setTokenCookie() {
 // ——————————————————————————————————————————————————————————————
 // 判断「鼠标下面是什么」：她本体 / 她的面板 / 空白
 // ——————————————————————————————————————————————————————————————
+// 命中"放大倍数"：掩码只覆盖画布约 78%×79%（有边距的角色剪影），
+// 于是她裙摆/头/脚这些掩码没盖到的地方，一按就被判成空气 → 主人觉得"点她身上拖不动"。
+// 做法：把测试点朝她**掩码的中心收缩**，等价于把掩码**按比例放大** ——
+// 不是往外试固定半径（那样在她较窄的高度上补不到左侧，实测无效）。
+const PET_GRAB_ZOOM = 1.7
+
 const hitJS = (x, y) => `(function(){try{
   var el=document.elementFromPoint(${x},${y});
   var ui=!!(el&&el.closest&&el.closest('.dshp-panel,.dshp-menu,.dshp-hud,.dshp-bubble,.dshp-composer,.dshp-dock,.dshp-tab,.dshp-mail'));
   if(ui) return 'panel';
-  if(window.DSHPet&&DSHPet.hitTest&&DSHPet.hitTest(${x},${y})) return 'model';
+  if(!(window.DSHPet&&DSHPet.hitTest)) return 'none';
+  // 先试正点：最准，也不改变"点在透明空气上"这个原判定
+  if(DSHPet.hitTest(${x},${y})) return 'model';
+  // 再按 1/4、2/4、3/4、4/4 的力度朝掩码中心收缩（等价于掩码放大到 ZOOM 倍）
+  var st=document.querySelector(".dshp-stage");
+  var r=st?st.getBoundingClientRect():null;
+  var info=window.DSHPet.maskInfo?DSHPet.maskInfo():null;
+  var t=info&&info.tight?info.tight:null;
+  if(!r||!t||t.w<=0||t.h<=0) return 'none';
+  var cx=t.x+t.w/2, cy=t.y+t.h/2;
+  var Z=${PET_GRAB_ZOOM};
+  for(var step=1;step<=4;step++){
+    var s=Z*step/4;
+    var px=Math.round(cx+(${x}-cx)/s), py=Math.round(cy+(${y}-cy)/s);
+    if(DSHPet.hitTest(px,py)) return 'model';
+  }
   return 'none';
 }catch(e){return 'none'}})()`
 
@@ -210,6 +231,33 @@ function createMain() {
   //    getContentSize() 给 DIP/CSS，Win32 GetWindowRect 给物理像素：两者相等就是 1:1，
   //    差 1.5 倍就必须做换算（不然区域会整体错位/缩放）。
   win.webContents.once("did-finish-load", async () => {
+    // 延迟一点，等模型与掩码都就绪
+    setTimeout(async () => {
+      try {
+        // 用字符串拼接而不是模板字面量：这段本身处在生成器的模板里，反引号会把它截断
+        var probe = "(function(){try{"
+          + 'var st=document.querySelector(".dshp-stage");'
+          + 'var r=st?st.getBoundingClientRect():null;'
+          + 'var info=window.DSHPet&&DSHPet.maskInfo?DSHPet.maskInfo():null;'
+          + 'var pts=[[292,450],[200,415],[63,415],[250,573],[292,545],[292,360],[292,500],[230,480]];'
+          // 严格（单点） vs 带放大（同 hitJS 的算法）—— 对比才能看出放大有没有解决问题
+          + 'function fuzzy(x,y){if(!(window.DSHPet&&DSHPet.hitTest))return false;if(DSHPet.hitTest(x,y))return true;var tt=info&&info.tight?info.tight:null;if(!tt||tt.w<=0)return false;var cx=tt.x+tt.w/2,cy=tt.y+tt.h/2;for(var st=1;st<=4;st++){var s=1.7*st/4;if(DSHPet.hitTest(Math.round(cx+(x-cx)/s),Math.round(cy+(y-cy)/s)))return true;}return false;}'
+          + 'var out=pts.map(function(p){var s=false,f=false;try{s=!!(window.DSHPet&&DSHPet.hitTest(p[0],p[1]));f=fuzzy(p[0],p[1])}catch(e){};return p[0]+","+p[1]+" 严格="+(s?"TA":"AIR")+" 容差="+(f?"TA":"AIR")});'
+          // 掩码字符图：把 128x112 的网格打成 32 行 x 64 列，直接看出她"在掩码里"长什么样
+          + 'var art="";'
+          + 'try{var g=window.DSHPet&&DSHPet.maskGrid?DSHPet.maskGrid():null;if(g){var GW=g.w,GH=g.h,grid=g.grid;'
+          + 'for(var ry=0;ry<28;ry++){var line="";for(var rx=0;rx<64;rx++){var x=Math.floor(rx*GW/64),y=Math.floor(ry*GH/28);line+=grid[y*GW+x]?"#":".";}art+=line+"\\n";}}}catch(e){art="ART-EXC "+e.message}'
+          + 'return JSON.stringify({stage:r?{x:Math.round(r.left),y:Math.round(r.top),w:Math.round(r.width),h:Math.round(r.height)}:null,tight:info&&info.tight?info.tight:null,pts:out,art:art});'
+          + '}catch(e){return "EXC "+e.message}})()'
+        const j = await win.webContents.executeJavaScript(probe)
+        try {
+          const o = JSON.parse(j)
+          bootLog("命中自检: stage=" + JSON.stringify(o.stage) + " tight=" + JSON.stringify(o.tight))
+          bootLog("命中自检: " + o.pts.join("  "))
+          bootLog("掩码字符图(128x112 -> 64x28):\n" + o.art)
+        } catch (e2) { bootLog("命中自检(原始): " + j) }
+      } catch (err) { bootLog("命中自检失败: " + String(err && err.message)) }
+    }, 2500)
     try {
       const b = win.getBounds()
       const cs = win.getContentSize()
@@ -293,6 +341,9 @@ function clampPet(x, y, w, h) {
       )
       // ★ 只有按在她**本体**上才拖：panel 让给网页，none（透明空气）直接不拖。
       //   判定用页面里的 DSHPet.hitTest —— 逐像素看她真实画出来的轮廓。
+      //   ⚠️ 这行诊断必须在 return **之前**打，否则命中的是 none 时日志里什么都看不到，
+      //      只能靠猜（已经被这个坑绕了一轮）。
+      bootLog('drag-start: hit=' + kind + ' local=' + Math.round(at.x - b.x) + ',' + Math.round(at.y - b.y))
       if (kind !== 'model') return
     } catch (e) {}
     dragFrom = { cx: win.getBounds().x, cy: win.getBounds().y, lx: NaN, ly: NaN, pendDx: 0, pendDy: 0, n: 0, lastAt: 0, startedAt: Date.now(), w: win.getBounds().width, h: win.getBounds().height }
