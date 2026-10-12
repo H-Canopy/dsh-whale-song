@@ -292,8 +292,12 @@ console.log('\n--- 拖动：必须是 follow 语义（跟手），不是 push --
   ok(/win\.setBounds\(\{ x: x2, y: y2, width: dragFrom\.w, height: dragFrom\.h \}\)/.test(shellSrc),
     '拖动写死按下时的宽高（防系统改动累积）', '')
   ok(/size=' \+ gb\.width/.test(shellSrc), '拖动轨迹记录尺寸（便于发现累积）', '')
-  ok(/const minY = wa\.y - \(dragFrom\.h - bodyB - PAD\)/.test(shellSrc) && /const maxY = wa\.y \+ wa\.height - bodyB - PAD/.test(shellSrc),
-    '拖动时夹进工作区，保证她本体留在屏幕内', '')
+  // 夹取目标：**她本体**完整留在工作区内（真机教训：窗口被拖到 y=-50 后她整只掉出屏幕，
+  // 表现就是"怎么拖都不动"）。夹取抽成 clampPet()，拖动循环 / 按下时 / 启动位置三处都用它。
+  ok(/function clampPet\(x, y, w, h\)/.test(shellSrc) && /const minY = wa\.y - \(h - PET_BODY\.offB/.test(shellSrc),
+    'clampPet() 按"她本体留在工作区内"夹取', '')
+  ok(/const c = clampPet\(wantX, wantY, dragFrom\.w, dragFrom\.h\)/.test(shellSrc), '拖动循环用 clampPet', '')
+  ok(/位置越界，已纠正/.test(shellSrc), '按下时立刻纠正越界位置（从出屏状态开始拖也能救回）', '')
   ok(/w: win\.getBounds\(\)\.width, h: win\.getBounds\(\)\.height/.test(shellSrc),
     'drag-start 时记下宽高', '')
   // 【实测根因守门员】Windows 计时器粒度 15.6ms 会把 setInterval(33) 拉成 46.6ms（实测），

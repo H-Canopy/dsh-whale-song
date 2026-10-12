@@ -235,6 +235,23 @@ function createMain() {
   // 拖动：页面里按下她 → 交给主进程搬窗口（拖动期间用 16ms 快速轮询，跟手）
   // 抓手偏移：按下时算一次「指针 − 窗口左上角」，之后 位置 = 指针 − 偏移（follow 语义）。
   // 两者都是 Electron 的 DIP 坐标（实测 scaleFactor=1.5 时同尺度），可直接相减。
+// 她画在窗口右下角：距右边 10px、距下边 49px、本体 240×209（见 _staging/measure-geo.mjs 实测）。
+const PET_BODY = { w: 240, h: 209, offR: 10, offB: 49 }
+/**
+ * 把窗口位置夹到"她本体完整留在工作区内"。
+ * 真机教训：不夹的话窗口会被拖到 y=-50，于是她在屏幕上被推到 y≈1044（超出工作区）→ 整个掉出屏幕，
+ * 表现就是"怎么拖都不动"。夹取的目标是**她本体**可见，而不是窗口本身。
+ */
+function clampPet(x, y, w, h) {
+  const wa = screen.getPrimaryDisplay().workArea
+  const PAD = 8
+  const minX = wa.x - (w - PET_BODY.offR - PET_BODY.w - PAD)
+  const maxX = wa.x + wa.width - PET_BODY.w - PET_BODY.offR - PAD
+  const minY = wa.y - (h - PET_BODY.offB - PET_BODY.h - PAD)
+  const maxY = wa.y + wa.height - PET_BODY.h - PET_BODY.offB - PAD
+  return { x: Math.max(minX, Math.min(maxX, x)), y: Math.max(minY, Math.min(maxY, y)) }
+}
+
   async function grabOffset() {
     try {
       const p = screen.getCursorScreenPoint()
@@ -266,6 +283,13 @@ function createMain() {
       if (kind === 'panel') return // 真控件（滑块/按钮/输入框）→ 让给网页
     } catch (e) {}
     dragFrom = { grab: await grabOffset(), n: 0, lastX: NaN, lastY: NaN, lastAt: 0, startedAt: Date.now(), w: win.getBounds().width, h: win.getBounds().height }
+    // 按下时先纠正一次位置：若她之前被拖到工作区外（真机出过：她在屏幕下方之外），
+    // 这一下就能把她拉回可见区域；否则拖动全程都在屏幕外，看起来就是"不动"。
+    try {
+      const cb = win.getBounds()
+      const cc = clampPet(cb.x, cb.y, cb.width, cb.height)
+      if (cc.x !== cb.x || cc.y !== cb.y) { win.setBounds({ x: cc.x, y: cc.y, width: cb.width, height: cb.height }); bootLog("drag-start: 位置越界，已纠正 " + cb.x + "," + cb.y + " → " + cc.x + "," + cc.y) }
+    } catch (err) {}
     clearTimeout(dragTimer)
       // —— 自校正循环（见上：Windows 计时器粒度 15.6ms 会把 setInterval(33) 拉成 46.8ms）——
       const STEP_MS = 33
@@ -283,18 +307,11 @@ function createMain() {
         if (wantX !== dragFrom.lastX || wantY !== dragFrom.lastY) {
           dragFrom.lastX = wantX
           dragFrom.lastY = wantY
-          // ⚠️ 必须夹进工作区（真机日志：want.y 会变成负数 → 窗口顶部跑出屏幕，她"消失/半截"）。
-          //   她画在窗口右下角（约距右边 20px、下边 10px、240×209），所以允许窗口左上角出屏，
-          //   但必须保证"她本体"留在工作区内 —— 否则你越用力往右上拖，她越看不见。
-          const PAD = 20
-          const bodyR = 240, bodyB = 209
-          const wa = screen.getPrimaryDisplay().workArea
-          const minX = wa.x - (dragFrom.w - bodyR - PAD)
-          const maxX = wa.x + wa.width - bodyR - PAD
-          const minY = wa.y - (dragFrom.h - bodyB - PAD)
-          const maxY = wa.y + wa.height - bodyB - PAD
-          const x2 = Math.max(minX, Math.min(maxX, wantX))
-          const y2 = Math.max(minY, Math.min(maxY, wantY))
+          // ⚠️ 必须夹进工作区。真机日志：窗口被抓到 y=-50（顶部出屏）后，她在屏幕上被推到
+          //   y≈1044（工作区只有 1019）→ **她整个掉到屏幕下方**，于是「怎么拖都不动」。
+          //   夹取的目标是「让她本体完整留在工作区内」，细节见 clampPet()。
+          const c = clampPet(wantX, wantY, dragFrom.w, dragFrom.h)
+          const x2 = c.x, y2 = c.y
           const t0 = Date.now()
           // 【尺寸防抖】实测（_staging/probe-size-creep.mjs）：透明窗口在 150% 缩放下，
           //   每次 setBounds 系统都可能"顺手"改尺寸（60 步涨 2px），尺寸一变画布就 resize
@@ -828,7 +845,7 @@ function createTray() {
 function resetPos() {
   if (!win) return
   const wa = screen.getPrimaryDisplay().workArea
-  win.setPosition(wa.x + wa.width - WIN_W - 8, wa.y + wa.height - WIN_H - 8)
+  { const c0 = clampPet(wa.x + wa.width - WIN_W - OFFSET, wa.y + wa.height - WIN_H - OFFSET, WIN_W, WIN_H); win.setPosition(c0.x, c0.y) }
   savePos()
 }
 
