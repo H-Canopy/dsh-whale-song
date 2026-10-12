@@ -69,20 +69,17 @@ const PLUGIN = 'github:Andersen216/dsh-whale-girl-live2d'
 // 同 macOS：窗口要装得下她 + 四周的面板（透明区域点击穿透，不挡别的窗口）
 const WIN_W = Number(process.env.DSHW_PET_W || 420) // 窗口只是"画布"：她只占右下角一块，其余是透明的
 const WIN_H = Number(process.env.DSHW_PET_H || 600) // 别比屏幕可视区还高（实测：900 高在可视 1019 的屏上，往上拖会被"夹回"挡住，像被关在框里）
-const BALL = 62
 const TOKEN_FILE = path.join(os.homedir(), '.dsh', 'dsh-live2d-pet-desktop.json')
 
 let win = null
-let ballWin = null
 let tray = null
 let cursorFeed = null
 let lastCursor = null
 let dragTimer = null
 let dragFrom = null
+let dragMove = null
 // 贴边小球单独一份拖动状态：原来和主窗口共用 dragFrom，收起状态下按小球会把
 // 已经 hide() 的主窗口一路搬走（B站/PR 反馈的真实 bug）
-let ballDrag = null
-let collapsed = false
 let lowPower = false
 let overPanel = false
 let failCount = 0
@@ -259,8 +256,6 @@ function createMain() {
   win.on('closed', () => { win = null })
 
   // 拖动：页面里按下她 → 交给主进程搬窗口（拖动期间用 16ms 快速轮询，跟手）
-  // 抓手偏移：按下时算一次「指针 − 窗口左上角」，之后 位置 = 指针 − 偏移（follow 语义）。
-  // 两者都是 Electron 的 DIP 坐标（实测 scaleFactor=1.5 时同尺度），可直接相减。
 // 她画在窗口右下角：距右边 10px、距下边 49px、本体 240×209（见 _staging/measure-geo.mjs 实测）。
 const PET_BODY = { w: 240, h: 209, offR: 10, offB: 49 }
 /**
@@ -277,16 +272,6 @@ function clampPet(x, y, w, h) {
   const maxY = wa.y + wa.height - PET_BODY.h - PET_BODY.offB - PAD
   return { x: Math.max(minX, Math.min(maxX, x)), y: Math.max(minY, Math.min(maxY, y)) }
 }
-
-  async function grabOffset() {
-    try {
-      const p = screen.getCursorScreenPoint()
-      const [wx, wy] = win.getPosition()
-      return { x: p.x - wx, y: p.y - wy }
-    } catch (err) {
-      return { x: 0, y: 0 }
-    }
-  }
 
   ipcMain.on('dshw-diag', (_e, msg) => bootLog('preload: ' + msg))
   ipcMain.on('drag-start', async (_e, at) => {
@@ -306,68 +291,82 @@ function clampPet(x, y, w, h) {
       const kind = await win.webContents.executeJavaScript(
         hitJS(Math.round(at.x - b.x), Math.round(at.y - b.y)),
       )
-      if (kind === 'panel') return // 真控件（滑块/按钮/输入框）→ 让给网页
+      // ★ 只有按在她**本体**上才拖：panel 让给网页，none（透明空气）直接不拖。
+      //   判定用页面里的 DSHPet.hitTest —— 逐像素看她真实画出来的轮廓。
+      if (kind !== 'model') return
     } catch (e) {}
-    dragFrom = { grab: await grabOffset(), n: 0, lastX: NaN, lastY: NaN, lastAt: 0, startedAt: Date.now(), w: win.getBounds().width, h: win.getBounds().height }
+    dragFrom = { cx: win.getBounds().x, cy: win.getBounds().y, lx: NaN, ly: NaN, pendDx: 0, pendDy: 0, n: 0, lastAt: 0, startedAt: Date.now(), w: win.getBounds().width, h: win.getBounds().height }
     // 按下时先纠正一次位置：若她之前被拖到工作区外（真机出过：她在屏幕下方之外），
     // 这一下就能把她拉回可见区域；否则拖动全程都在屏幕外，看起来就是"不动"。
     try {
       const cb = win.getBounds()
       const cc = clampPet(cb.x, cb.y, cb.width, cb.height)
       if (cc.x !== cb.x || cc.y !== cb.y) { const ex = cc.x - (cc.x % 2), ey = cc.y - (cc.y % 2); win.setBounds({ x: ex, y: ey, width: cb.width, height: cb.height }); bootLog("drag-start: 位置越界，已纠正 " + cb.x + "," + cb.y + " → " + ex + "," + ey) }
+      if (dragFrom) { dragFrom.cx = ex; dragFrom.cy = ey; dragFrom.lx = ex; dragFrom.ly = ey }
     } catch (err) {}
     clearTimeout(dragTimer)
-      // —— 自校正循环（见上：Windows 计时器粒度 15.6ms 会把 setInterval(33) 拉成 46.8ms）——
+      // —— 拖动 = **增量法**：页面按指针位移发 drag-move，这里只负责搬窗口 ——
+      // 老办法是"主进程每 33ms 读全局光标，再反推窗口位置（光标 − 抓手偏移）"。
+      // 真机日志证明那样只有 x 跟得上、y 会冻住（cur 的 y 从 318 变到 525，set 的 y 一直 114）。
+      // 现在位移由页面直接给出，主进程不做任何反推 → 天生跟手，也没有 DPI 换算的坑。
+      // 夹取/量化/写死宽高这三条老教训全部保留（见 dragMoveTo）。
       const STEP_MS = 33
-      // 注意：startedAt 必须在 tick 之前声明（tick 第一次执行就要用；放后面会 TDZ 抛错，
-      // 表现是"拖动完全没反应"）。
-      const startedAt = Date.now()
-      const tick = () => {
-        if (!dragFrom || !win || win.isDestroyed()) { dragTimer = null; return }
-        const p = screen.getCursorScreenPoint()
-        const wantX = Math.round(p.x - dragFrom.grab.x)
-        const wantY = Math.round(p.y - dragFrom.grab.y)
-        // ⚠️ 这里**绝不能 return**：调度在函数末尾，一旦 return 循环就永久停了
-        //   （外部评审抓到的 bug：刚按下/慢速微调/中途停一下 → 拖动冻死）。
-        //   所以去重是条件块，跳过这一帧的"搬窗口"，但照常调度下一帧。
-        if (wantX !== dragFrom.lastX || wantY !== dragFrom.lastY) {
-          dragFrom.lastX = wantX
-          dragFrom.lastY = wantY
-          // ⚠️ 必须夹进工作区。真机日志：窗口被抓到 y=-50（顶部出屏）后，她在屏幕上被推到
-          //   y≈1044（工作区只有 1019）→ **她整个掉到屏幕下方**，于是「怎么拖都不动」。
-          //   夹取的目标是「让她本体完整留在工作区内」，细节见 clampPet()。
-          // 【位置量化】实测（_staging/probe-size-quant.mjs，60 步 × 4 组对照）：
-          //   位置原样 → 窗口宽高从 422 涨到 424；量化到 1.5 的倍数 → 仍涨 2px；
-          //   **只用 setPosition → 暴涨 60px（更糟）**；**量化到偶数 → Δ=0，60 步一次都没变**。
-          //   所以拖动位置取偶数（她画在右下角，2px 的整数步长看不出来），
-          //   这样窗口尺寸不再被系统"顺手"改 → 画布不再 resize → 闪的最后一环也断掉。
-          const c = clampPet(wantX, wantY, dragFrom.w, dragFrom.h)
-          const x2 = c.x - (c.x % 2), y2 = c.y - (c.y % 2)
-          const t0 = Date.now()
-          // 【尺寸防抖】实测（_staging/probe-size-creep.mjs）：透明窗口在 150% 缩放下，
-          //   每次 setBounds 系统都可能"顺手"改尺寸（60 步涨 2px），尺寸一变画布就 resize
-          //   （掩码重建 + 视觉跳）= 残留的闪。
-          //   ⚠️ 这里**必须写死按下时的宽高**：早先试过"读当前值再原样传回"，结果系统的改动
-          //   会被当成新基准吃掉（27 次拖动涨了 16px）。写死后最坏每次只 ±1px，不累积。
-          win.setBounds({ x: x2, y: y2, width: dragFrom.w, height: dragFrom.h })
-          const costMs = Date.now() - t0
-          // 拖动轨迹诊断（只记前 80 帧）：want vs got 不一致 → 被挪走；宽高变化 → 闪的嫌疑
-          try {
-            if (dragFrom.n < 200) {
-              dragFrom.n++
-              const gb = win.getBounds()
-              const now = Date.now()
-              const gap = dragFrom.lastAt ? now - dragFrom.lastAt : 0
-              dragFrom.lastAt = now
-              bootLog('drag: cur=' + p.x + ',' + p.y + ' want=' + wantX + ',' + wantY + ' set=' + x2 + ',' + y2 + ' got=' + gb.x + ',' + gb.y + ' size=' + gb.width + 'x' + gb.height + ' cost=' + costMs + 'ms gap=' + gap + 'ms' + (gb.x !== x2 || gb.y !== y2 ? ' <-- 被挪走' : '') + (gb.width !== dragFrom.w || gb.height !== dragFrom.h ? ' <-- 宽高变了(系统改的)' : ''))
-            }
-          } catch (err) {}
-        }
-        const now = Date.now()
-        dragTimer = setTimeout(tick, Math.max(0, STEP_MS - (now - startedAt) % STEP_MS))
+      let movePending = false
+      const dragMoveTo = (dx, dy) => {
+        if (!dragFrom || !win || win.isDestroyed()) return
+        const c = clampPet(dragFrom.cx + dx, dragFrom.cy + dy, dragFrom.w, dragFrom.h)
+        const x2 = c.x - (c.x % 2), y2 = c.y - (c.y % 2)
+        // 基准点跟着「实际生效的位置」走：否则贴边时继续往外拖、夹取把它挡住不动，
+        // 而累计位移一直在涨 → 往回拖的瞬间会「弹」一下。
+        const appliedX = x2 - dragFrom.cx
+        const appliedY = y2 - dragFrom.cy
+        dragFrom.cx = x2
+        dragFrom.cy = y2
+        // 把夹取吃掉的那部分从待处理位移里扣掉
+        dragFrom.pendDx -= appliedX
+        dragFrom.pendDy -= appliedY
+        if (x2 === dragFrom.lx && y2 === dragFrom.ly) return
+        dragFrom.lx = x2
+        dragFrom.ly = y2
+        const t0 = Date.now()
+        win.setBounds({ x: x2, y: y2, width: dragFrom.w, height: dragFrom.h })
+        const costMs = Date.now() - t0
+        try {
+          if (dragFrom.n < 200) {
+            dragFrom.n++
+            const gb = win.getBounds()
+            const now = Date.now()
+            const gap = dragFrom.lastAt ? now - dragFrom.lastAt : 0
+            dragFrom.lastAt = now
+            bootLog('drag: d=' + dx + ',' + dy + ' set=' + x2 + ',' + y2 + ' got=' + gb.x + ',' + gb.y + ' size=' + gb.width + 'x' + gb.height + ' cost=' + costMs + 'ms gap=' + gap + 'ms' + (gb.x !== x2 || gb.y !== y2 ? ' <-- 被挪走' : '') + (gb.width !== dragFrom.w || gb.height !== dragFrom.h ? ' <-- 宽高变了(系统改的)' : ''))
+          }
+        } catch (err) {}
       }
-      dragTimer = setTimeout(tick, 0)
+      const runMove = () => {
+        movePending = false
+        if (!dragFrom) return
+        const t0 = Date.now()
+        dragMoveTo(dragFrom.pendDx, dragFrom.pendDy)
+        // 合并窗口内的多次 move → 每个 STEP_MS 只搬一次窗口（避免每毫秒 setBounds）
+        dragTimer = setTimeout(runMove, Math.max(0, STEP_MS - (Date.now() - t0)))
+      }
+      dragMove = (adx, ady) => {
+        if (!dragFrom) return
+        // 页面给的是**相对按下点的累计位移**，这里换算成「还要再挪多少」
+        dragFrom.pendDx = adx - dragFrom.cx
+        dragFrom.pendDy = ady - dragFrom.cy
+        if (movePending) return
+        movePending = true
+        dragTimer = setTimeout(runMove, 0)
+      }
     win.webContents.executeJavaScript("document.dispatchEvent(new PointerEvent('pointercancel',{bubbles:true}))").catch(() => {})
+  })
+  // 页面按指针位移发过来（preload 里记的是**相对按下点的累计位移**）。
+  // 这里只老老实实搬窗口，不做任何反推 —— 老办法就是死在反推上（y 冻住）。
+  ipcMain.on('drag-move', (_e, d) => {
+    if (typeof dragMove !== 'function') return
+    if (!d) return
+    dragMove(Number(d.dx) || 0, Number(d.dy) || 0)
   })
   ipcMain.on('drag-end', () => {
     // 拖动时长诊断（见上：用来区分「只是点了一下」和「拖动被打断」）
@@ -390,12 +389,12 @@ function clampPet(x, y, w, h) {
   ipcMain.on('shell-msg', (_e, msg) => {
     switch (msg) {
       case 'hidden':
-      case 'collapse':
-        if (!collapsed) collapse()
+      case 'collapse':  // 折叠已删：收到也当显示处理
+        showPetAlways()
         break
       case 'shown':
       case 'expand':
-        if (collapsed) expand()
+        showPetAlways()
         break
       case 'host:auto':
       case 'host:desktop':
@@ -731,116 +730,15 @@ function installPlugin() {
   })
 }
 
-// ——————————————————————————————————————————————————————————————
-// 贴边小球（收起态）
-// ——————————————————————————————————————————————————————————————
-function ballHTML() {
-  const icon = readWhaleSVG()
-  return `<!doctype html><meta charset="utf-8"><style>
-  html,body{margin:0;height:100%;background:transparent;overflow:hidden;user-select:none;-webkit-app-region:no-drag}
-  .ball{width:100%;height:100%;border-radius:50%;box-sizing:border-box;display:flex;align-items:center;justify-content:center;
-    background:radial-gradient(120% 120% at 50% 0%, rgba(60,70,96,.98), rgba(16,20,32,.98));
-    border:1.5px solid rgba(255,255,255,.34);box-shadow:0 6px 18px rgba(0,0,0,.38);cursor:pointer}
-  .ball:hover{border-color:rgba(255,255,255,.6);transform:scale(1.06)}
-  svg{width:58%;height:58%}
-  svg path{fill:#fff}
-  </style><body><div class="ball">${icon}</div></body>`
-}
-
-function readWhaleSVG() {
-  const cands = [
-    path.join(process.env.APPDATA || '', 'npm', 'node_modules', '@deepseek-ai', 'dsh', 'node_modules', '@deepseek-ai', 'dsh-web-frontend', 'dist', 'favicon.svg'),
-    '/usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/favicon.svg',
-  ]
-  for (const p of cands) {
-    try {
-      const s = fs.readFileSync(p, 'utf8')
-      if (s.includes('<svg')) return s.replace(/<style>[\s\S]*?<\/style>/, '')
-    } catch (e) {}
-  }
-  return '<svg viewBox="0 0 24 24"><path d="M3 15c3 0 4-2 6-2s3 2 6 2 4-3 6-3v3c-2 0-3 3-6 3s-3-2-6-2-3 2-6 2z"/></svg>'
-}
-
-function createBall() {
-  ballWin = new BrowserWindow({
-    width: BALL,
-    height: BALL,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    hasShadow: false,
-    skipTaskbar: true,
-    show: false,
-    alwaysOnTop: true,
-    // ⚠️ 小球也必须挂 preload：它是靠 window.dshpetBridge 把点击/拖动报回来的，
-    // 不挂就等于「小球点不动、拖不了」（写完先自查发现的）
-    webPreferences: { contextIsolation: true, preload: path.join(__dirname, 'preload.js') },
-  })
-  ballWin.setAlwaysOnTop(true, 'screen-saver')
-  ballWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(ballHTML()))
-  ballWin.webContents.on('did-finish-load', () => {
-    // 点一下展开；拖一下挪位置（松手贴最近的一边）
-    ballWin.webContents.executeJavaScript(`
-      (function(){
-        var d=false, moved=0, sx=0, sy=0;
-        document.addEventListener('mousedown', function(e){ d=true; moved=0; sx=e.screenX; sy=e.screenY; e.preventDefault() });
-        document.addEventListener('mousemove', function(e){ if(!d) return; moved=Math.max(moved, Math.abs(e.screenX-sx)+Math.abs(e.screenY-sy));
-          if(moved>3) window.dshpetBridge && window.dshpetBridge.ballMove(e.screenX-sx, e.screenY-sy) });
-        document.addEventListener('mouseup', function(){ if(!d) return; d=false;
-          window.dshpetBridge && window.dshpetBridge.ballDrop(moved>3) });
-      })()
-    `).catch(() => {})
-  })
-  ipcMain.on('ball-move', (_e, dx, dy) => {
-    if (!ballWin || !ballDrag) return
-    ballWin.setPosition(Math.round(ballDrag[0] + dx), Math.round(ballDrag[1] + dy))
-  })
-  ipcMain.on('ball-drop', (_e, moved) => {
-    if (!ballWin) return
-    if (!moved) return expand()
-    snapBall()
-  })
-}
-
-function snapBall() {
-  if (!ballWin) return
-  const wa = screen.getPrimaryDisplay().workArea
-  const [x, y] = ballWin.getPosition()
-  const nearest = x + BALL / 2 < wa.x + wa.width / 2 ? wa.x + 4 : wa.x + wa.width - BALL - 4
-  const ny = Math.min(Math.max(y, wa.y + 4), wa.y + wa.height - BALL - 4)
-  ballWin.setPosition(nearest, ny)
-}
-
-function collapse() {
-  if (!win || collapsed) return
-  collapsed = true
-  savePos()
-  const [wx, wy] = win.getPosition()
-  const wa = screen.getPrimaryDisplay().workArea
-  const onLeft = wx + WIN_W / 2 < wa.x + wa.width / 2
-  if (!ballWin) createBall()
-  ballWin.setPosition(onLeft ? wa.x + 4 : wa.x + wa.width - BALL - 4, Math.round(wy + WIN_H / 2 - BALL / 2))
-  ballWin.showInactive()
-  ballWin.setAlwaysOnTop(true, 'screen-saver')
-  win.hide()
-  ballDrag = [ballWin.getPosition()[0], ballWin.getPosition()[1]]
-  setTimeout(snapBall, 30)
-}
-
-function expand() {
-  if (!collapsed) return
-  collapsed = false
-  if (ballWin) {
-    ballDrag = null
-    ballWin.hide()
-  }
-  if (win) {
+/** 折叠功能已删除：任何"显示她"的请求都走这里。 */
+function showPetAlways() {
+  try {
+    if (!win || win.isDestroyed()) return
     win.showInactive()
     win.setAlwaysOnTop(true, 'screen-saver')
     win.webContents.executeJavaScript('window.DSHPet && DSHPet.setHidden && DSHPet.setHidden(false)').catch(() => {})
-  }
+  } catch (err) {}
 }
-
 // ——————————————————————————————————————————————————————————————
 // 托盘菜单（Windows 上没有菜单栏图标，改放系统托盘）
 // ——————————————————————————————————————————————————————————————
@@ -854,7 +752,6 @@ function createTray() {
     tray.setContextMenu(
       Menu.buildFromTemplate([
         { label: '重新加载', click: load },
-        { label: collapsed ? '展开桌宠' : '收起成小球（贴边）', click: () => (collapsed ? expand() : collapse()) },
         { label: '回到右下角', click: resetPos },
         { type: 'separator' },
         {
@@ -872,7 +769,7 @@ function createTray() {
         { label: '彻底退出', click: () => app.quit() },
       ]),
     )
-  tray.on('click', () => (collapsed ? expand() : win && win.showInactive()))
+  tray.on('click', () => win && win.showInactive())
   setInterval(rebuild, 1500)
   rebuild()
 }

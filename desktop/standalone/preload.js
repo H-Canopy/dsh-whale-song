@@ -18,8 +18,6 @@ contextBridge.exposeInMainWorld('webkit', {
 contextBridge.exposeInMainWorld('dshpetBridge', {
   install: () => ipcRenderer.send('install-plugin'),
   reload: () => ipcRenderer.send('reload'),
-  ballMove: (dx, dy) => ipcRenderer.send('ball-move', dx, dy),
-  ballDrop: (moved) => ipcRenderer.send('ball-drop', moved),
 })
 
 // 拖动：页面里按下她 → 告诉主进程搬窗口（主进程只在鼠标确实压在她身上时才搬，
@@ -33,6 +31,41 @@ function dshwDiag(msg) {
 window.addEventListener('mousedown', function (e) { dshwDiag('mousedown btn=' + e.button + ' screen=' + e.screenX + ',' + e.screenY + ' client=' + e.clientX + ',' + e.clientY) }, true)
 window.addEventListener('mouseup', function () { dshwDiag('mouseup') }, true)
 dshwDiag('preload 已加载')
+
+// ——— 拖动改「增量法」：页面算指针位移，主进程只做 setPosition ———
+// 为什么换：老办法是主进程每 33ms 读全局光标再**反推**窗口位置（光标 − 抓手偏移）。
+//   真机日志显示那样只有 x 跟得上、y 会冻住（cur 的 y 变了而 set 的 y 不动）。
+//   增量法没有反推这一步，天生跟手，也不受 DPI 换算影响。
+// 注册顺序很关键：这一组必须在文件末尾那两个老监听**之前**跑，
+//   并在最后用同一件事把老监听「吃掉」，否则同一次按下会发两条 drag-start。
+var dshwDown = null
+var dshwLast = { x: 0, y: 0 }
+window.addEventListener('mousedown', function (e) {
+  if (e.button !== 0) return
+  dshwDown = { x: e.screenX, y: e.screenY }
+  dshwLast = { x: 0, y: 0 }
+  ipcRenderer.send('drag-start', { x: e.screenX, y: e.screenY, clientX: e.clientX, clientY: e.clientY })
+}, true)
+window.addEventListener('mousemove', function (e) {
+  if (!dshwDown) return
+  // 只发相对按下点的**累计**位移：帧丢了也不会漂（每帧都是绝对量，不是增量叠加）。
+  var dx = e.screenX - dshwDown.x
+  var dy = e.screenY - dshwDown.y
+  if (dx === dshwLast.x && dy === dshwLast.y) return
+  dshwLast = { x: dx, y: dy }
+  ipcRenderer.send('drag-move', { dx: dx, dy: dy })
+}, true)
+window.addEventListener('mouseup', function () {
+  if (!dshwDown) return
+  dshwDown = null
+  ipcRenderer.send('drag-end')
+}, true)
+
+// 老协议（无条件 drag-start / drag-end）在这里被同一个事件吃掉，
+// 保证「要不要拖动」只由上面这组决定（真正的门禁在主进程：只有按在她本体上才搬窗口）。
+function dshwSwallow(e) { if (e.type === "mouseup" || e.button === 0) e.stopImmediatePropagation() }
+window.addEventListener('mousedown', dshwSwallow, true)
+window.addEventListener('mouseup', dshwSwallow, true)
 window.addEventListener('mousedown', (e) => {
   if (e.button === 0) ipcRenderer.send('drag-start', { x: e.screenX, y: e.screenY })
 }, true)

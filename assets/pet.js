@@ -2719,6 +2719,14 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
           // 原因：原来只认 hitTest（她模型身上），而工具栏在她**下方**、不在模型掩码里。
           // 现在把「鼠标在工具栏矩形内」也算作悬停，并且离开后多留 900ms。
           const on = hitTest(e.clientX, e.clientY) || overDock(e.clientX, e.clientY)
+          // 光标形状：在她本体上给「抓手」，明确告诉她这儿可以拖（主人参照 NewMax 提的）。
+          // 只认 hitTest（不含工具栏）：工具栏是可点的按钮，给抓手会误导。
+          // 网页版里她也是 DOM 元素，所以这里两边都受益。
+          try {
+            const onBody = hitTest(e.clientX, e.clientY)
+            const want = onBody ? 'grab' : ''
+            if (document.documentElement.style.cursor !== want) document.documentElement.style.cursor = want
+          } catch (err) {}
           if (on) {
             root.classList.add('dshp-hover')
             if (leaveTimer) {

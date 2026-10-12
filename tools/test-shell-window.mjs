@@ -263,59 +263,53 @@ console.log('\n--- 托盘 ---')
 
 console.log('\n--- 拖动：必须是 follow 语义（跟手），不是 push ---')
 {
-  // 上游的写法是 `起点 + (指针 − 按下点)`（push 语义），我们改成 follow：
-  // 按下时记住"指针相对窗口左上角的偏移"，之后 位置 = 指针 − 偏移。
-  // 说明：窗口**没被夹取**时两种写法数学上等价（都等于 指针−固定偏移）；差异只出现在
-  // 夹取/取整把窗口挪走之后 —— push 会把那次误差一直带着（越拖越偏、撞夹取就跳回），
-  // follow 每帧按"当前窗口位置"重算，不累积。桩模拟不出"被夹取"，所以断言**公式本身**。
+  // 【第二轮重写】拖动从「主进程反推」改成「页面给位移的增量法」。
+  //   为什么换：真机日志证明反推（位置 = 光标 − 抓手偏移）只有 x 跟得上、y 会冻住
+  //   （cur 的 y 从 318 变到 525，而 set 的 y 一直 114）。增量法没有反推这一步。
+  //   同时主人明确要求：**只能抓她本体才拖**，抓透明空气不许动窗口。
   const shellSrc = fs.readFileSync(path.join(SHELL, 'main.js'), 'utf8')
-  ok(/const wantX = Math\.round\(p\.x - dragFrom\.grab\.x\)/.test(shellSrc) && /win\.setBounds\(\{ x: x2, y: y2/.test(shellSrc),
-    '拖动用的是 follow 公式：位置 = 指针 − 抓手偏移（再夹进工作区）', '')
-  ok(!/dragFrom\.win/.test(shellSrc),
-    '拖动不再依赖"按下时的窗口位置"（push 的根源）', '')
-  ok(!/p\.x - dragFrom\.mouse\.x/.test(shellSrc),
-    '拖动不再用"指针相对按下点的位移"（那是不跟手的根源）', '')
-  ok(/async function grabOffset\(\)/.test(shellSrc), '有 grabOffset()：按下时只算一次抓手偏移', '')
-  // 性能守门员（实测依据）：透明窗口 setPosition 6.5ms/次，16ms(60fps) 一帧必然积压 → 晃/闪。
-  ok(/\}, 33\)/.test(shellSrc) || /const STEP_MS = 33/.test(shellSrc), '拖动节拍目标是 33ms（30fps）', '')
-  // 【外部评审抓到的 bug 守门员】自校正循环里"位置没变"绝不能写成 `return`
-  // （调度在函数末尾，return 会让循环再也不会被调度 → 拖动永久冻住）。
-  ok(/if \(wantX !== dragFrom\.lastX \|\| wantY !== dragFrom\.lastY\) \{/.test(shellSrc),
-    '"位置没变就不搬"写成了条件块（不是 return —— 那会让循环自杀）', '')
-  {
-    const i = shellSrc.indexOf('const tick = () => {')
-    const j = shellSrc.indexOf('dragTimer = setTimeout(tick', i)
-    const body = shellSrc.slice(i, j).split(/\r?\n/).filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
-    const returns = (body.match(/\breturn\b/g) || []).length
-    ok(returns === 1, 'tick 里只有守卫那一处 return（实测 ' + returns + ' 处）', '')
-  }
-  // 150% 缩放下系统会在位置变化时顺手改尺寸（实测 60 步涨 2px，`probe-size-creep.mjs`）→
-  // 画布 resize → 闪。所以**写死按下时的宽高**（试过"读当前值原样传回"，系统改动会被当成
-  // 新基准吃掉：真机 27 次拖动涨 16px）。
+  const preloadSrc = fs.readFileSync(path.join(SHELL, 'preload.js'), 'utf8')
+  // ① 门禁：只有 hitTest 判成 model（她本体）才进入拖动
+  ok(/if \(kind !== 'model'\) return/.test(shellSrc),
+    '拖动门禁：只有按在她本体（hitTest=model）才搬窗口', '')
+  ok(!/if \(kind === 'panel'\) return/.test(shellSrc),
+    '旧的"只挡 panel"判定已删除（那种写法让透明区也能拖）', '')
+  // ② 页面给位移，主进程不做反推
+  ok(/const c = clampPet\(dragFrom\.cx \+ dx, dragFrom\.cy \+ dy, dragFrom\.w, dragFrom\.h\)/.test(shellSrc),
+    '增量法：新位置 = 当前位置 + 页面给的位移，再夹取', '')
+  ok(!/dragFrom\.grab/.test(shellSrc) && !/async function grabOffset/.test(shellSrc),
+    '抓手偏移（grabOffset / dragFrom.grab）已彻底删除', '')
+  ok(!/getCursorScreenPoint\(\)[\s\S]{0,200}dragFrom\.cx/.test(shellSrc),
+    '拖动不再读全局光标反推位置（y 冻死的根源）', '')
+  ok(/ipcMain\.on\('drag-move'/.test(shellSrc) && /dragMove = \(adx, ady\) => \{/.test(shellSrc),
+    '主进程收 drag-move 并把累计位移换算成"还要挪多少"', '')
+  ok(/ipcRenderer\.send\('drag-move', \{ dx: dx, dy: dy \}\)/.test(preloadSrc),
+    'preload 上报指针位移（相对按下点的累计量）', '')
+  ok(/window\.addEventListener\('mousemove', function \(e\) \{[\s\S]{0,400}dshwDown/.test(preloadSrc),
+    'preload 只在按下期间上报位移', '')
+  // ③ 节拍：多次 mousemove 合并成一个 STEP_MS 周期，别每毫秒 setBounds
+  ok(/const STEP_MS = 33/.test(shellSrc), '拖动节拍仍是 33ms（30fps）', '')
+  ok(/if \(movePending\) return/.test(shellSrc) && /movePending = true/.test(shellSrc),
+    '同一周期的多次 move 被合并（避免每毫秒 setBounds）', '')
+  // ④ 老三条教训必须全在
   ok(/win\.setBounds\(\{ x: x2, y: y2, width: dragFrom\.w, height: dragFrom\.h \}\)/.test(shellSrc),
     '拖动写死按下时的宽高（防系统改动累积）', '')
   ok(/size=' \+ gb\.width/.test(shellSrc), '拖动轨迹记录尺寸（便于发现累积）', '')
-  // 夹取目标：**她本体**完整留在工作区内（真机教训：窗口被拖到 y=-50 后她整只掉出屏幕，
-  // 表现就是"怎么拖都不动"）。夹取抽成 clampPet()，拖动循环 / 按下时 / 启动位置三处都用它。
   ok(/function clampPet\(x, y, w, h\)/.test(shellSrc) && /const minY = wa\.y - \(h - PET_BODY\.offB/.test(shellSrc),
     'clampPet() 按"她本体留在工作区内"夹取', '')
-  ok(/const c = clampPet\(wantX, wantY, dragFrom\.w, dragFrom\.h\)/.test(shellSrc), '拖动循环用 clampPet', '')
-  // 实测（_staging/probe-size-quant.mjs，60 步 ×4 组）：位置原样→尺寸涨 2px；量化到 1.5 的倍数→仍涨 2px；
-  // 只用 setPosition→暴涨 60px；**量化到偶数→Δ=0**。所以拖动位置必须取偶数。
   ok(/const x2 = c\.x - \(c\.x % 2\), y2 = c\.y - \(c\.y % 2\)/.test(shellSrc),
     '拖动位置量化到偶数（实测只有这样窗口尺寸才不涨）', '')
   ok(/位置越界，已纠正/.test(shellSrc), '按下时立刻纠正越界位置（从出屏状态开始拖也能救回）', '')
+  ok(/dragFrom\.cx = ex; dragFrom\.cy = ey/.test(shellSrc),
+    '纠正后同步拖动基准（否则第一帧会按旧位置算而跳一下）', '')
   ok(/w: win\.getBounds\(\)\.width, h: win\.getBounds\(\)\.height/.test(shellSrc),
     'drag-start 时记下宽高', '')
-  // 【实测根因守门员】Windows 计时器粒度 15.6ms 会把 setInterval(33) 拉成 46.6ms（实测），
-  // 于是"30fps"实际只有 21fps —— 这就是闪帧的直接来源。必须用自校正 setTimeout。
-  ok(/自校正循环/.test(shellSrc) && /STEP_MS - \(now - startedAt\) % STEP_MS/.test(shellSrc),
-    '拖动循环是自校正 setTimeout（setInterval 会被系统粒度拉长 40%）', '')
+  // ⑤ 累加不会被夹取"吃掉"：基准点要跟着实际生效位置走
+  ok(/const appliedX = x2 - dragFrom\.cx/.test(shellSrc) && /dragFrom\.pendDx -= appliedX/.test(shellSrc),
+    '夹取吃掉的位移会从待处理量里扣掉（贴边不积压）', '')
   ok(!/dragTimer = setInterval/.test(shellSrc), '不再用 setInterval 驱动拖动', '')
   ok(!/clearInterval\(dragTimer\)/.test(shellSrc) && /clearTimeout\(dragTimer\)/.test(shellSrc),
     'dragTimer 是 setTimeout 句柄，清理用 clearTimeout', '')
-  ok(shellSrc.indexOf('const startedAt = Date.now()') < shellSrc.indexOf('const tick = () => {'),
-    'startedAt 在 tick 之前声明（否则 TDZ 抛错，拖动完全失效）', '')
   // 【真 bug 守门员 · 已升级】原来的问题是"拖动期间不能切穿透"；现在更彻底：
   // 整个切穿透机制都没了（poll + setIgnore 一起删除），所以只要断言它**不存在**即可 ——
   // 这样"拖动中被切回穿透"这一类 bug 在结构上不可能再发生。
@@ -327,14 +321,24 @@ console.log('\n--- 拖动：必须是 follow 语义（跟手），不是 push --
   }
 }
 
-console.log('\n--- 贴边小球（第二个透明窗口）---')
+console.log('\n--- 「收起成小球」已按主人要求整条删除 ---')
 {
-  // 触发"收起"：壳收到页面消息 collapse 就建小球窗口
-  const ipc = report.filter((r) => r.t === 'win').length
-  // 直接看有没有第二个窗口被建（壳在 collapse() 里才建，所以这里只能验"逻辑存在"）
+  // 为什么删：真机两次事故 —— ① 收起来后小球被放到屏幕外（点不到、回不来）；
+  // ② 小球后来渲染成一个巨大的深色圆盘且**越变越大**。
+  // 它唯一的价值就是"折叠"，而代价是可能永久失联，所以整条线拆掉，不留折叠态。
   const collapsedCode = fs.readFileSync(path.join(SHELL, 'main.js'), 'utf8')
-  ok(/ballWin = new BrowserWindow\(/.test(collapsedCode) && /transparent: true/.test(collapsedCode),
-    '收起小球用的是第二个透明窗口（代码里就有）', '')
+  const preloadCode = fs.readFileSync(path.join(SHELL, 'preload.js'), 'utf8')
+  ok(!/ballWin/.test(collapsedCode) && !/createBall/.test(collapsedCode) && !/ballHTML/.test(collapsedCode),
+    '小球窗口（第二个 BrowserWindow）已彻底删除', '')
+  ok(!/\bcollapsed\b/.test(collapsedCode) && !/收起成小球/.test(collapsedCode),
+    '折叠态与它的托盘菜单项已删除（不再有"回不来"的状态）', '')
+  ok(!/ballMove|ballDrop/.test(preloadCode), 'preload 里小球用的桥已删除', '')
+  // 但"显示她"的能力必须留着（收到 collapse/expand/shown 一律显示）
+  ok(/function showPetAlways\(\)/.test(collapsedCode) && /showPetAlways\(\)/.test(collapsedCode),
+    '保留 showPetAlways()：任何"显示她"的请求都有出口（折叠删了但显示能力不能丢）', '')
+  ok(/case 'collapse'/.test(collapsedCode) && /case 'expand'/.test(collapsedCode),
+    '旧的 collapse/expand 协议仍被接受（老前端发过来不会报错）', '')
+  const ipc = report.filter((r) => r.t === 'win').length
   ok(ipc >= 1, '主窗口已建（' + ipc + ' 个窗口对象）', '')
 }
 
