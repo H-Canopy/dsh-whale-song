@@ -10,7 +10,7 @@
  * 手点容易漏步骤，而且「市场和 npm 的撞名」这种坑必须自动挡在前面。
  *
  * 需要的 token：**classic token 勾 `public_repo` 就够**（建仓库 / 推送 / fork / 开 PR 都覆盖）。
- *   https://github.com/settings/tokens/new?scopes=public_repo&description=dsh-whale-girl-live2d
+ *   https://github.com/settings/tokens/new?scopes=public_repo&description=dsh-whale-song
  *
  * 想「以后一直能发新版本」：把 token 存进 macOS 钥匙串一次即可（本脚本会自动读）：
  *   security add-generic-password -a Andersen216 -s dsh-whale-girl-live2d-publish -w
@@ -181,14 +181,16 @@ const ZH = ('DSH 里的 Live2D 桌宠「鲸鱼娘」：模型常驻 Web 界面�
   + '（思考、调工具、逐字输出、报错、收工庆祝），点一下就能直接给 agent 发消息、'
   + '回复逐字冒进气泡；右键菜单可换表情、戴眼镜贴纸、摆桌面场景、演一次性小动作，'
   + '动作全部照模型作者自己的按键表设计，互不冲突、到点自动收回。'
-  + '模型素材非商业（CC BY-NC-SA 4.0），代码 MIT，作者 Andersen216。')
+  + '模型素材非商业（CC BY-NC-SA 4.0，作者 上善无形 / ZipZipPipe / 氵六青），'
+  + '代码 MIT（原作者 Andersen216）；本增强版 fork 由 H-Canopy 维护。')
 const EN = ('A Live2D whale-girl companion for the DeepSeek Harness Web UI: the model stays on '
   + 'screen and reacts to what the agent is actually doing (thinking, tool calls, streaming '
   + 'text, errors, turn completion); click her to send the agent a message and watch the reply '
   + 'stream into a speech bubble; right-click for a menu of expressions, dress-up items, desk '
   + 'scenes and one-shot animations, every action mapped from the original model author hotkey '
   + 'sheet so nothing overlaps and everything expires on its own. Non-commercial model assets '
-  + '(CC BY-NC-SA 4.0), MIT code, by Andersen216 (https://github.com/Andersen216).')
+  + '(CC BY-NC-SA 4.0, by the original character/model artists), MIT code by Andersen216; '
+  + 'this enhanced fork is maintained by H-Canopy (https://github.com/H-Canopy).')
 
 const entryFile = `${OWNER}__${REPO}.yml`
 const entryYaml = `url: https://github.com/${OWNER}/${REPO}\n`

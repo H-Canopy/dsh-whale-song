@@ -1,5 +1,21 @@
 # B 站动态 · 成品（复制就能发）
 
+> ⚠️ **发之前必须改三处**（2026-10-13 逐条核对过）：
+>
+> 1. **`L33/34` 的 Mac / Windows 安装包链接是死的** ——
+>    `H-Canopy/dsh-whale-song` 的 releases 页**是空的**，仓库里也没有 CI 自动打包，
+>    点下去 404。要么先 `npm run desktop:dist` 本机打包再手动传 release，要么把这两行删掉。
+> 2. **`L22` 写的"收起会变成一个贴边的小圆球"已经不对了** ——
+>    小球那套早被删掉（会跑到屏幕外回不来），现在是**同一个窗口内收成「🐋 大肥鱼」标签**，
+>    点标签或托盘展开。发之前改成这个说法，否则用户会找不到小球。
+> 3. **`L74/L76` 的"三个版本 / 三端客户端"** 要按实际能力写 ——
+>    网页版一定能用；桌面壳（Windows Electron）本机跑得起来但**没发过安装包**；
+>    macOS 客户端在这个 fork 里**没有验证过、也没有产物**。
+>
+> 另外正文里那句「我只负责把她接进 DeepSeek」对**这个 fork** 要补一句：
+> 你是在上游（Andersen216，MIT）基础上做的增强版 fork，**代码原作者是 Andersen216**，
+> 你加的是音乐/电台/桌面壳那些。别把上游的代码功劳也说成自己的。
+
 > 配图 4 张（都在 `dist/promo/`，按下面顺序贴）：
 > ① `B站-2-三个版本.png` ② `B站-3-原理.png` ③ `分享图-2-怎么装.png` ④ `分享图-1-主图.png`
 
@@ -29,10 +45,10 @@
 代码 MIT、模型部分 CC BY-NC-SA 4.0 非商业，完全免费开源，不收费、不带货。
 
 下载和说明都在这儿：
-网页版：dsh plugin --profile web add github:Andersen216/dsh-whale-girl-live2d
-Mac：https://github.com/Andersen216/dsh-whale-girl-live2d/releases/latest/download/DS-WhaleGirl-Pet-macOS.zip
-Windows：https://github.com/Andersen216/dsh-whale-girl-live2d/releases/latest/download/DS-WhaleGirl-Pet-Windows.zip
-一页讲清楚怎么装（含排错）：https://andersen216.github.io/dsh-whale-girl-live2d/
+网页版：dsh plugin --profile web add github:H-Canopy/dsh-whale-song
+Mac：https://github.com/H-Canopy/dsh-whale-song/releases/latest/download/DS-WhaleGirl-Pet-macOS.zip
+Windows：https://github.com/H-Canopy/dsh-whale-song/releases/latest/download/DS-WhaleGirl-Pet-Windows.zip
+一页讲清楚怎么装（含排错）：https://github.com/H-Canopy/dsh-whale-song
 
 装完记得重启一次 DSH 她才出现。有问题、或者没装成功，评论区告诉我，我一条条回。也欢迎转给用 DeepSeek 的朋友 :)
 ```

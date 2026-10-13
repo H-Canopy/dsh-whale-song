@@ -27,8 +27,8 @@
 署名和许可都写在仓库最显眼的位置了：代码 MIT，模型部分 CC BY-NC-SA 4.0 非商业，
 角色形象 @上善无形 @ZipZipPipe、模型 @氵六青。
 
-仓库：github.com/Andersen216/dsh-whale-girl-live2d
-一页说清楚怎么装：andersen216.github.io/dsh-whale-girl-live2d/
+仓库：github.com/H-Canopy/dsh-whale-song
+一页说清楚怎么装：github.com/H-Canopy/dsh-whale-song
 （如果老师觉得哪里不合适，我立刻改或撤下，绝无二话）
 ```
 
@@ -38,7 +38,7 @@
 老师好！把您的鲸鱼娘做成了 DSH 的桌宠插件（开源免费非商业），
 她跟着 agent 的真实状态换表情动作，44 个表情 8 个动作全照您按键表来的。
 署名和许可都标好了：代码 MIT，模型 CC BY-NC-SA 4.0。
-github.com/Andersen216/dsh-whale-girl-live2d
+github.com/H-Canopy/dsh-whale-song
 ```
 
 ---
@@ -58,7 +58,7 @@ github.com/Andersen216/dsh-whale-girl-live2d
 如果有任何不合适的地方我立刻改，或者直接撤下来。
 另外如果老师想看某个特定动作/表情的表现，我随时录给您看。
 
-仓库：https://github.com/Andersen216/dsh-whale-girl-live2d
+仓库：https://github.com/H-Canopy/dsh-whale-song
 ```
 
 ---
@@ -81,8 +81,8 @@ github.com/Andersen216/dsh-whale-girl-live2d
 模型来自 B 站 @氵六青（角色形象 @上善无形 / @ZipZipPipe），
 代码 MIT、模型 CC BY-NC-SA 4.0 非商业，免费开源。
 
-仓库：github.com/Andersen216/dsh-whale-girl-live2d
-怎么装（一页讲完）：andersen216.github.io/dsh-whale-girl-live2d/
+仓库：github.com/H-Canopy/dsh-whale-song
+怎么装（一页讲完）：github.com/H-Canopy/dsh-whale-song
 ```
 
 ---
