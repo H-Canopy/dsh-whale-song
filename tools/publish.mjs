@@ -29,15 +29,40 @@ import { fileURLToPath } from 'node:url'
 const OWNER = (() => {
   const a = process.argv.find((x) => x.startsWith('--owner='))
   if (a) return a.slice('--owner='.length)
-  return process.env.GH_OWNER || 'Andersen216'
+  return process.env.GH_OWNER || 'H-Canopy'
 })()
-const REPO = 'dsh-whale-girl-live2d'         // 插件名（短、且与 npm 上三家同名鲸鱼娘桌宠区分开）
+/**
+ * 插件名（= package.json 的 name = GitHub 仓库名）。
+ *
+ * ⚠️ 这里**必须跟 package.json 一致**，而且本增强版 fork 的名字是 `dsh-whale-song`。
+ *    上游叫 `dsh-whale-girl-live2d`；这个 fork **故意改名**，好让两边能同时装、互不替换。
+ *    所以别照抄上游那份自检里的名字 —— 曾经写死成上游名，导致自检永远报
+ *    「名字是 dsh-whale-song，应该是 dsh-whale-girl-live2d」这种假红，
+ *    久了两条真问题（LICENSE 缺非商业声明）就被淹在假红里看不见了。
+ *    要发到别的名字下：--repo=xxx 或 GH_REPO 环境变量。
+ */
+const REPO = (() => {
+  const a = process.argv.find((x) => x.startsWith('--repo='))
+  if (a) return a.slice('--repo='.length)
+  return process.env.GH_REPO || 'dsh-whale-song'
+})()
 const LIST_OWNER = 'awesome-dsh-plugin'
 const LIST_REPO = 'awesome-dsh-plugin'
 const CATEGORY = 'fun'
 const BRANCH = 'main'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+/**
+ * 同步睡一会儿（毫秒）。
+ * ⚠️ 别用 `execFileSync('sleep', ...)` —— 那是 Unix 命令，Windows 上没有，
+ *    会直接抛 `spawnSync sleep ENOENT` 把整个自检弄崩（真踩过：自检跑到"远端撞名检查"
+ *    就崩了，看起来像网络问题，其实是缺 sleep）。
+ *    Atomics.wait 是标准库、同步、跨平台，不需要任何外部命令。
+ */
+function sleepSync(ms) {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) } catch (e) {}
+}
 // token 来源优先级：环境变量 → macOS 钥匙串（推荐，钥匙串是加密的，不用明文存）
 // 存一次（在你自己终端里跑，会让你手动输入，不会进 shell 历史）：
 //   security add-generic-password -a Andersen216 -s dsh-whale-girl-live2d-publish -w
@@ -66,17 +91,26 @@ function gh(method, url, body) {
   try { return JSON.parse(out) } catch (e) { return { raw: out } }
 }
 
-function urlCode(u, auth) {
-  // 网络抖动不该被当成「名字被占」——重试三次，仍失败就返回 ERR 由调用方区分处理
+/**
+ * 取一个 URL 的 HTTP 状态码。网络抖动不当成"名字被占"——重试三次，仍失败返回 'ERR'。
+ *
+ * ⚠️ 这里**不再用 curl**。原来那版是 Unix-only，有两个坑：
+ *    · `-o /dev/null` —— Windows 上没有 /dev/null，curl 写不进去 →
+ *      满屏 `curl: (23) client returned ERROR on write of N bytes`，然后返回 ERR，
+ *      看起来像"网络问题"，其实是路径不存在；
+ *    · 加上重试用的 `sleep` 命令，一共两个 Unix 依赖。
+ *    Node 20+ 自带 fetch，标准库、跨平台、不用起子进程。
+ */
+async function urlCode(u, auth) {
   for (let i = 0; i < 3; i++) {
-    const args = ['-sS', '--max-time', '20', '-o', '/dev/null', '-w', '%{http_code}',
-      '-H', 'User-Agent: dsh-publish', u]
-    if (auth && TOKEN) args.push('-H', `Authorization: Bearer ${TOKEN}`)
     try {
-      const code = execFileSync('curl', args, { encoding: 'utf8' }).trim()
+      const headers = { 'User-Agent': 'dsh-publish' }
+      if (auth && TOKEN) headers.Authorization = `Bearer ${TOKEN}`
+      const res = await fetch(u, { method: 'GET', headers, signal: AbortSignal.timeout(20000) })
+      const code = String(res.status)
       if (/^\d{3}$/.test(code)) return code
     } catch (e) {}
-    execFileSync('sleep', ['1'])
+    if (i < 2) sleepSync(1000)
   }
   return 'ERR'
 }
@@ -130,12 +164,12 @@ if (fs.existsSync(path.join(ROOT, '.git'))) {
 console.log('\n二、远端撞名检查（npm / GitHub 都已经有三家同类插件了，必须挡）')
 
 for (const n of [REPO]) {
-  const c = urlCode(`https://registry.npmjs.org/${n}`)
+  const c = await urlCode(`https://registry.npmjs.org/${n}`)
   if (c === '404') ok(`npm 名字空闲：${n}`)
   else if (c === 'ERR') info(`npm 上 ${n} 这次没查通（网络问题，不是撞名）——发布前建议再跑一次自检`)
   else { bad(`npm 上 ${n} 已被占用（HTTP ${c}）—— 插件名撞车会导致市场装到别人的包`); problems++ }
 }
-const repoCode = urlCode(`https://api.github.com/repos/${OWNER}/${REPO}`, true)
+const repoCode = await urlCode(`https://api.github.com/repos/${OWNER}/${REPO}`, true)
 if (repoCode === '404') ok(`GitHub 仓库还没建：${OWNER}/${REPO}（脚本会建）`)
 else if (repoCode === '200') ok(`GitHub 仓库已存在，将更新：${OWNER}/${REPO}`)
 else { bad(`查 GitHub 仓库失败：HTTP ${repoCode}`); problems++ }
@@ -231,9 +265,9 @@ ok(`token 账号：${login}`)
 const fork = gh('POST', `https://api.github.com/repos/${LIST_OWNER}/${LIST_REPO}/forks`, {})
 let forkReady = false
 for (let i = 0; i < 20; i++) {
-  const c = urlCode(`https://api.github.com/repos/${login}/${LIST_REPO}`, true)
+  const c = await urlCode(`https://api.github.com/repos/${login}/${LIST_REPO}`, true)
   if (c === '200') { forkReady = true; break }
-  execFileSync('sleep', ['1.5'])
+  sleepSync(1500)
 }
 if (!forkReady) { console.error('fork 还没就绪，稍后重跑本脚本即可（仓库已推好，只会补提 PR）'); process.exit(1) }
 ok(`fork 就绪：${login}/${LIST_REPO}`)
