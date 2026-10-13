@@ -59,7 +59,8 @@ try {
   }
   const waitFor = async (expression) => {
     for (let i = 0; i < 100; i++) { if (await ev(expression)) return; await sleep(150) }
-    throw new Error('Condition failed: ' + expression)
+    const details = await ev(`({ready:document.readyState,error:window.__DSHPetError||null,shell:window.__DSHPET_SHELL__,bridge:!!window.dshPetNative,visibility:!!window.__deliverVisibility,root:document.querySelector('.dshp-root')?.className,canvas:document.querySelector('canvas')?.width})`)
+    throw new Error('Condition failed: ' + expression + ' ' + JSON.stringify(details))
   }
   const check = (name, condition) => { assert(condition, name); pass++; console.log('  ok ' + name) }
   await send('Page.navigate', { url: host.petBase + '/dsh-pet/app' })
@@ -74,6 +75,58 @@ try {
   owner.close()
   await waitFor('window.__DSH_DESKTOP_OWNED__ === false')
   check('a crashed shell with a stale config endpoint cannot leave the pet hidden', await ev('getComputedStyle(document.querySelector(".dshp-root")).display !== "none" && !!DSHPet.inputSnapshot()'))
+  // Load the real desktop renderer with a recording bridge in an isolated browser profile.
+  await send('Page.enable')
+  await send('Page.addScriptToEvaluateOnNewDocument', { source: `
+    window.__DSHPET_SHELL__=true;
+    window.__bridgeMessages=[];window.__snapshots=0;window.__sayCalls=0;
+    window.webkit={messageHandlers:{dshpetshell:{postMessage:(message)=>window.__bridgeMessages.push(message)}}};
+    window.dshPetNative={
+      input:(s)=>{window.__snapshots++;window.__lastSnapshot=s},hover:()=>{},dragStart:()=>window.__bridgeMessages.push('drag'),dragMove:()=>{},dragEnd:()=>{},
+      focusInput:(on,activate)=>window.__bridgeMessages.push({focus:on,activate}),
+      composition:(on)=>window.__bridgeMessages.push({composition:on}),
+      onCursor:()=>{},onVisibility:(fn)=>window.__deliverVisibility=fn,traceInput:()=>{}
+    };
+    const realFetch=window.fetch;
+    window.fetch=(url,options)=>{
+      if(String(url).endsWith('/say')){window.__sayCalls++;return Promise.resolve(new Response('{"ok":false,"error":"test-only"}',{headers:{'Content-Type':'application/json'}}))}
+      return realFetch(url,options);
+    };
+  ` })
+  await send('Page.navigate', { url: host.petBase + '/dsh-pet/app' })
+  await waitFor('!!window.DSHPet && !!DSHPet.inputSnapshot() && !!window.__deliverVisibility')
+  await ev(`window.__bridgeMessages=[];DSHPet.setHidden(true);DSHPet.setHidden(true);window.__deliverVisibility(false)`)
+  check('page hide emits exactly one request and native acknowledgement emits none', await ev(`window.__bridgeMessages.filter(m=>m==='hidden').length===1 && document.querySelector('.dshp-root').classList.contains('dshp-hidden')`))
+  await waitFor('window.__lastSnapshot.collapsed===true && window.__lastSnapshot.panels.length===1')
+  check('collapsed desktop retains a visible accessible 大肥鱼 tab and no model hit region', await ev(`document.querySelector('.dshp-tab').textContent.includes('大肥鱼') && getComputedStyle(document.querySelector('.dshp-tab')).display==='flex' && getComputedStyle(document.querySelector('.dshp-stage')).visibility==='hidden' && window.__lastSnapshot.panels[0].w>0`))
+  const recoveryPoint = await ev(`(()=>{const r=document.querySelector('.dshp-tab').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...recoveryPoint, button: 'left', buttons: 1, clickCount: 1 })
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: recoveryPoint.x + 10, y: recoveryPoint.y + 10, buttons: 1 })
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: recoveryPoint.x + 10, y: recoveryPoint.y + 10, button: 'left', buttons: 0, clickCount: 1 })
+  check('dragging recovery tab starts native drag and suppresses synthesized expansion click', await ev(`window.__bridgeMessages.includes('drag') && !window.__bridgeMessages.includes('shown') && document.body.classList.contains('dshp-pet-hidden')`))
+  await ev(`document.querySelector('.dshp-tab').click()`)
+  check('clicking the recovery tab requests expansion once', await ev(`window.__bridgeMessages.filter(m=>m==='shown').length===1`))
+  await ev(`window.__bridgeMessages=window.__bridgeMessages.filter(m=>m!=='shown')`)
+  const reported = await ev('window.__snapshots')
+  await ev('window.__deliverVisibility(true)')
+  await waitFor('!document.querySelector(".dshp-root").classList.contains("dshp-hidden")')
+  check('restore reports a fresh mask without a shown/hide acknowledgement loop', await ev(`window.__snapshots>${reported} && window.__bridgeMessages.filter(m=>m==='shown').length===0`))
+  await ev(`document.querySelector('.dshp-dock button').click()`)
+  await waitFor('document.activeElement.tagName === "TEXTAREA"')
+  await send('Input.imeSetComposition', { text: 'ni', selectionStart: 2, selectionEnd: 2 })
+  check('real browser composition reaches the desktop input bridge', await ev(`window.__bridgeMessages.some(m=>m && m.composition===true)`))
+  await send('Input.imeSetComposition', { text: '你好', selectionStart: 2, selectionEnd: 2 })
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 })
+  check('confirming a Chinese composition cannot submit the draft', await ev('window.__sayCalls===0'))
+  await send('Input.insertText', { text: '你好' })
+  await waitFor(`window.__bridgeMessages.some(m=>m && m.composition===false)`)
+  check('Chinese draft is committed intact', await ev(`document.querySelector('textarea').value==='你好'`))
+  await send('Input.insertText', { text: ' world' })
+  check('subsequent typing appends without losing previous characters', await ev(`document.querySelector('textarea').value==='你好 world'`))
+  await ev(`document.querySelector('.dshp-composer .dshp-close').click()`)
+  await sleep(60)
+  check('closing the composer releases DOM focus and input mode', await ev(`document.activeElement.tagName!=='TEXTAREA' && window.__bridgeMessages.filter(m=>m && typeof m==='object' && 'focus' in m).at(-1).focus===false`))
   console.log('结果：pass ' + pass + ' / fail 0')
 } finally {
   if (ws) ws.close()

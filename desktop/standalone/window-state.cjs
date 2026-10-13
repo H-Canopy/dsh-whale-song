@@ -5,13 +5,16 @@ const DEFAULT_BODY = { x: 170, y: 342, w: 240, h: 210 }
 const finite = (n) => Number.isFinite(n)
 const even = (n) => Math.round(n / 2) * 2
 
-function clampWindow(position, body, areas, pad = 8) {
+function clampWindow(position, body, areas, pad = 8, quantize = true) {
   const b = body || DEFAULT_BODY
   const center = { x: position.x + b.x + b.w / 2, y: position.y + b.y + b.h / 2 }
   const distance = (a) => Math.max(a.x - center.x, 0, center.x - a.x - a.width) ** 2
     + Math.max(a.y - center.y, 0, center.y - a.y - a.height) ** 2
   const a = areas.reduce((best, next) => distance(next) < distance(best) ? next : best)
-  const fit = (v, lo, hi) => even(Math.max(lo, Math.min(Math.max(lo, hi), v)))
+  const fit = (v, lo, hi) => {
+    const clamped = Math.max(lo, Math.min(Math.max(lo, hi), v))
+    return quantize ? even(clamped) : clamped
+  }
   return {
     x: fit(position.x, a.x + pad - b.x, a.x + a.width - pad - b.x - b.w),
     y: fit(position.y, a.y + pad - b.y, a.y + a.height - pad - b.y - b.h),
@@ -24,12 +27,13 @@ function beginDrag(bounds) {
 }
 function advanceDrag(drag, dx, dy, body, areas) {
   if (!finite(dx) || !finite(dy)) return null
-  const next = clampWindow({ x: drag.x + dx - drag.dx, y: drag.y + dy - drag.dy }, body, areas)
+  // Retain sub-pixel input between frames; rounding every incremental move loses slow drags.
+  const next = clampWindow({ x: drag.x + dx - drag.dx, y: drag.y + dy - drag.dy }, body, areas, 8, false)
   drag.dx = dx
   drag.dy = dy
   drag.x = next.x
   drag.y = next.y
-  return { ...next, width: drag.width, height: drag.height }
+  return { x: even(next.x), y: even(next.y), width: drag.width, height: drag.height }
 }
 
 function savedPosition(bounds, body, areas) {

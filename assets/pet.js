@@ -575,7 +575,7 @@
   --dshp-fg:#132043;--dshp-bg:rgba(246,249,255,.96);--dshp-line:rgba(30,60,130,.14);
   /* 鲸鱼蓝（和官网、App 图标同一套色）；只改颜色，别的一律不动 */
   --dshp-accent:#3b62f6;--dshp-radius:14px;transition:opacity .25s ease}
-.dshp-root.dshp-hidden{opacity:0;pointer-events:none!important}
+.dshp-root.dshp-hidden{opacity:0;visibility:hidden;pointer-events:none!important}
 /* 恢复用的把手挂在 body 上、不在 .dshp-root 里，所以这里必须是 body 级类：
    用后代选择器会永远匹配不到，隐藏之后就再也找不回来了。 */
 body.dshp-pet-hidden .dshp-tab{display:flex}
@@ -807,6 +807,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
   .dshp-hud-tag.dshp-peak{background:rgba(255,86,110,.2);color:#ff8a9c;border-color:rgba(255,138,156,.4)}
   .dshp-hud-tag.dshp-valley{background:rgba(52,211,153,.18);color:#6ee7b7;border-color:rgba(110,231,183,.4)}}
 .dshp-tab{position:fixed;right:16px;bottom:16px;z-index:2147483002;pointer-events:auto;cursor:pointer;
+  --dshp-line:rgba(30,60,130,.18);--dshp-bg:rgba(246,249,255,.98);--dshp-fg:#132043;
   border:1px solid var(--dshp-line);background:var(--dshp-bg);color:var(--dshp-fg);
   border-radius:20px;padding:6px 13px;font-size:12px;font-weight:600;
   box-shadow:0 6px 18px rgba(10,14,30,.28);transition:transform .12s ease;
@@ -1509,6 +1510,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       if (mainStarted) return
       mainStarted = true
       injectStyle()
+      restoreCfg()   // 把上次保存的配置（CFG.*）套用回来
       ui = buildUI()
       await loadRuntime()
       const [man, cdi] = await Promise.all([
@@ -1987,12 +1989,10 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
   /** 贴住某一侧墙：left/right + top 固定，竖直位置由主人自己定 */
   function applyEdge(edge, y) {
     const root = ui.root
-    // 外观档位：跟随系统（默认）/ 浅色 / 深色 —— 手动选过就按本地的来
-    try {
-      restoreCfg()
-      const th = readLayout().theme
-      if (th === 'light' || th === 'dark') root.dataset.dshpTheme = th
-    } catch (err) {}
+    // 外观交给 applyTheme()（在 applyPosition 里统一调用）。
+    // 原来这里自己读一次 theme，有两个问题：① 只在贴边路径生效，自由摆放时主题不生效；
+    // ② 没有显式选择时它什么都不设，于是 CSS 的 prefers-color-scheme 把人带成深色。
+    // 顺带把 restoreCfg() 也挪走：那是"应用配置"，不属于"贴边"。
 
     const yy = clampY(Number(y) || 0, root.getBoundingClientRect().height || 0, window.innerHeight)
     root.style.left = edge === 'left' ? EDGE_GAP + 'px' : 'auto'
@@ -2008,11 +2008,29 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
    *   · x + y        —— 完全自由摆放
    *   · corner       —— 老存档（左下/右下那种），读到时自动迁移成 edge 形式，竖直位置按角落换算
    */
+  /**
+   * 外观档位：**默认浅色**，用户在设置里显式选过就按他选的（跟随系统 / 浅色 / 深色）。
+   *
+   * 为什么默认改成浅色：主人反馈「把这些菜单换成浅色背景」。
+   * 而且**必须写显式 data-dshp-theme**、不能靠"不写"> —— 因为 CSS 里有一套
+   * `@media (prefers-color-scheme:dark)`，系统是深色时它会把人带成深色；
+   * 显式属性 `.dshp-root[data-dshp-theme="light"]` 优先级更高（0,2,0 > 0,1,0），能压住它。
+   */
+  function applyTheme() {
+    try {
+      const explicit = readLayout().theme
+      const use = explicit === 'light' || explicit === 'dark' ? explicit : 'light'
+      ui.root.dataset.dshpTheme = use
+      console.log('[鲸鱼娘] 外观=' + use + (explicit ? '（手动选择）' : '（默认）'))
+    } catch (err) {}
+  }
+
   function applyPosition(layout) {
     const root = ui.root
     const vh = window.innerHeight
     const h = root.getBoundingClientRect().height || 0
     const dock = dockClearance()
+    applyTheme()   // 两条定位路径都要套用外观（原来只在 applyEdge 里设，自由摆放时主题不生效）
 
     if (layout.edge === 'left' || layout.edge === 'right') {
       applyEdge(layout.edge, layout.edgeY != null ? layout.edgeY : vh - h - dock - EDGE_GAP)
@@ -2159,6 +2177,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
 
   /** 客户端坐标是否落在鲸鱼娘身上（而不是桌宠框里的空气）。 */
   function hitTest(clientX, clientY) {
+    if (ui && ui.root.classList.contains('dshp-hidden')) return false
     const stage = app && app.view && app.view.parentElement
     if (!stage) return false
     const r = stage.getBoundingClientRect()
@@ -2500,7 +2519,9 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     menu.append(tabs, panes)
     addCloseButton(menu)
 
-    const tab = $('div', 'dshp-tab', '🐋 鲸鱼娘')
+    const tab = $('button', 'dshp-tab', window.dshPetNative ? '🐋 大肥鱼' : '🐋 鲸鱼娘')
+    tab.type = 'button'
+    tab.title = window.dshPetNative ? '点击展开鲸鱼娘；拖动移动位置' : '点击展开鲸鱼娘'
 
     // 右键弹出的 HUD（余额 / 本轮消耗 / 峰谷计价）
     const hud = $('div', 'dshp-hud')
@@ -3677,12 +3698,16 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     },
   }
 
-  function setHidden(hidden) {
+  function setHidden(hidden, notifyShell = true) {
+    if (!ui || !ui.root) return
+    hidden = !!hidden
+    if (ui.root.classList.contains('dshp-hidden') === hidden) return
+    if (hidden) closePanels()
     ui.root.classList.toggle('dshp-hidden', !!hidden)
     document.body.classList.toggle('dshp-pet-hidden', !!hidden)
     if (hidden) ui.bubble.hide()
     saveLayout({ hidden: !!hidden })
-    if (shell.on) shell.post(hidden ? 'hidden' : 'shown')
+    if (shell.on && notifyShell) shell.post(hidden ? 'hidden' : 'shown')
   }
 
   /**
@@ -3752,6 +3777,8 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
   }
 
   function closePanels() {
+    // CSS visibility alone does not release the textarea's DOM focus.
+    if (ui.composer.el.contains(document.activeElement)) document.activeElement.blur()
     ui.composer.el.classList.remove('dshp-on')
     ui.menu.el.classList.remove('dshp-on')
     ui.root.classList.remove('dshp-open')
@@ -3759,10 +3786,13 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
 
   function bindComposer(u) {
     const { ta, send, cancel } = u.composer
+    let composingText = false
+    ta.addEventListener('compositionstart', () => { composingText = true })
+    ta.addEventListener('compositionend', () => { composingText = false })
     const stop = (e) => e.stopPropagation()
     for (const ev of ['keydown', 'keyup', 'keypress']) ta.addEventListener(ev, stop)
     ta.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !composingText && e.keyCode !== 229) {
         e.preventDefault()
         doSend()
       }
@@ -3822,7 +3852,12 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     if (which === 'talk') {
       ui.menu.el.classList.remove('dshp-on')
       ui.composer.el.classList.add('dshp-on')
-      setTimeout(() => ui.composer.ta.focus(), 60)
+      setTimeout(() => {
+        if (!ui.composer.el.classList.contains('dshp-on') || ui.root.classList.contains('dshp-hidden')) return
+        ui.composer.ta.focus()
+        // An inactive non-focusable native window may not emit DOM focusin from focus() alone.
+        if (window.dshPetNative) window.dshPetNative.focusInput(true, true)
+      }, 60)
     } else {
       ui.composer.el.classList.remove('dshp-on')
       renderPane(ui.menu.focused || 'face')
@@ -4421,6 +4456,8 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
   }
 
   function connectSSE() {
+    // Static/file previews have no host event endpoint and should not retry it.
+    if (BOOT.standalone && BASE !== '/dsh-pet') return
     clearTimeout(sseRetryTimer)
     if (sseConnection) sseConnection.close()
     let es = null
@@ -5014,6 +5051,11 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     },
     /** 隐藏 / 恢复。桌面壳通过托盘找回角色时也恢复页面状态。 */
     setHidden,
+    resumeDesktop: () => {
+      if (!window.__DSHPET_SHELL__) return
+      mask.dirty = true
+      if (app) app.start()
+    },
     /** 壳子告诉页面「你记着的连接档位是哪一档」（设置页据此高亮） */
     setHostPref: (v) => {
       try {

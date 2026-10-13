@@ -37,6 +37,15 @@ test('zero delta and malformed delta cannot move the pet', () => {
   assert.equal(advanceDrag(drag, 0, 0, body, a).x, 500)
   assert.equal(advanceDrag(drag, NaN, 0, body, a), null)
 })
+test('slow one-pixel and fractional drags retain movement in both directions', () => {
+  for (const direction of [-1, 1]) {
+    const drag = beginDrag({ x: 500, y: 300, width: 420, height: 600 })
+    let result
+    for (let i = 1; i <= 30; i++) result = advanceDrag(drag, direction * i / 3, direction * i / 3, body, a)
+    assert.equal(result.x, 500 + direction * 10)
+    assert.equal(result.y, 300 + direction * 10)
+  }
+})
 test('second monitor with a negative origin remains reachable', () => {
   const result = clampWindow({ x: -900, y: 100 }, body, [{ x: -1920, y: 0, width: 1920, height: 1080 }, ...a])
   assert.equal(result.x, -900)
@@ -72,6 +81,7 @@ class FakeWindow {
     this.options = options; this.bounds = { x: 0, y: 0, width: options.width, height: options.height }
     this.events = new Map(); this.visible = false
     this.webContents = {
+      focus: () => nativeCalls.push(['webFocus']),
       on: (name, fn) => this.events.set('web:' + name, fn), setWindowOpenHandler() {},
       send: (...args) => nativeCalls.push(['send', ...args]), executeJavaScript: async () => {},
     }
@@ -87,19 +97,22 @@ class FakeWindow {
   setAlwaysOnTop() {} setMenuBarVisibility() {}
   setIgnoreMouseEvents(on, options) { nativeCalls.push(['ignore', on, options]) }
   setFocusable(on) { nativeCalls.push(['focusable', on]) }
-  focus() { nativeCalls.push(['focus']) }
+  focus() { this.focused = true; nativeCalls.push(['focus']) }
+  isFocused() { return !!this.focused }
   showInactive() { this.visible = true; nativeCalls.push(['showInactive']) }
   hide() { this.visible = false }
   async loadURL(url) { this.url = url; this.events.get('web:did-finish-load')?.(); this.events.get('ready-to-show')?.() }
 }
 let trayMenu
-class FakeTray { setToolTip() {} setContextMenu(menu) { trayMenu = menu } on() {} destroy() {} }
+let trayClick
+class FakeTray { setToolTip() {} setContextMenu(menu) { trayMenu = menu } on(name, fn) { if (name === 'click') trayClick = fn } destroy() {} }
 const display = { workArea: a[0], bounds: { ...a[0] }, scaleFactor: 1.5 }
 let linked = true
 const fakeLink = {
   start: async () => {}, refresh: async () => {}, close() {}, onChange: () => () => {},
   status: () => ({ connected: linked, base: linked ? 'http://127.0.0.1:19387' : null }),
 }
+let serverOptions
 const electron = {
   app, BrowserWindow: FakeWindow, Tray: FakeTray, Menu: { buildFromTemplate: (menu) => menu },
   screen: { getAllDisplays: () => [display], getPrimaryDisplay: () => display,
@@ -110,7 +123,10 @@ const electron = {
 }
 const fakeRequire = (name) => {
   if (name === 'electron') return electron
-  if (name === './server.cjs') return { resolveRepoRoot: () => ROOT, startPetServer: async () => ({ petBase: 'http://127.0.0.1:54321', close() {} }) }
+  if (name === './server.cjs') return { resolveRepoRoot: () => ROOT, startPetServer: async (options) => {
+    serverOptions = options
+    return { petBase: 'http://127.0.0.1:54321', close() {} }
+  } }
   if (name === './dsh-link.cjs') return { createDshLink: () => fakeLink }
   if (name === './window-state.cjs') return require(path.join(SHELL, 'window-state.cjs'))
   return require(name)
@@ -157,6 +173,15 @@ try {
     cursor = { x: p.x + 20, y: p.y + 20 }; tickPointer()
     assert.equal(nativeCalls.filter((call) => call[0] === 'ignore').at(-1)[1], true)
   })
+  test('delayed forwarded hover cannot override the current OS cursor hit', () => {
+    cursor = { x: win.bounds.x + 320, y: win.bounds.y + 490 }
+    tickPointer()
+    ipc.get('pet-hover')(sender, { x: 10, y: 10 })
+    assert.equal(nativeCalls.filter((call) => call[0] === 'ignore').at(-1)[1], false)
+    cursor = { x: win.bounds.x + 10, y: win.bounds.y + 10 }
+    ipc.get('pet-hover')(sender, { x: 320, y: 490 })
+    assert.equal(nativeCalls.filter((call) => call[0] === 'ignore').at(-1)[1], true)
+  })
   test('foreign IPC sender and transparent background cannot start a drag', () => {
     ipc.get('drag-start')({ sender: {} }, { x: 320, y: 490 })
     ipc.get('drag-start')(sender, { x: 20, y: 20 })
@@ -182,11 +207,92 @@ try {
     ipc.get('drag-end')(sender, { dx: 0, dy: 0 })
     assert.deepEqual(win.getBounds(), before)
   })
-  test('focus is enabled for an input field and disabled on blur', () => {
+  test('focus is enabled for an input field and released when the page says so', () => {
     ipc.get('pet-focus')(sender, true)
-    assert(nativeCalls.some((call) => call[0] === 'focus'))
+    assert(nativeCalls.some((call) => call[0] === 'focus'), '输入框获得焦点时要真的 win.focus()')
+    assert.deepEqual(nativeCalls.filter((call) => call[0] === 'focusable').at(-1), ['focusable', true], '输入框激活时窗口必须 focusable（Windows 上非 focusable 收不到键盘）')
+    // ⚠️ 回归守门员：**窗口 blur 绝不能把 focusable 关掉**。
+    // 真机事故（2026-10-13）"对话框输入不了、时好时坏"就是这个竞态：
+    //   窗口一失焦 → focusable=false → 键盘没了；而输入框从未失去 DOM 焦点，
+    //   页面的 focusin 不会再触发 → 没人把它设回 true → 输入框变砖。
+    const before = nativeCalls.filter((call) => call[0] === 'focusable').length
     win.events.get('blur')()
-    assert.deepEqual(nativeCalls.filter((call) => call[0] === 'focusable').at(-1), ['focusable', false])
+    assert.equal(nativeCalls.filter((call) => call[0] === 'focusable').length, before,
+      '窗口 blur 不许动 focusable（否则输入框会永久收不到键盘）')
+    // 释放由页面决定（focusout → pet-focus false）
+    ipc.get('pet-focus')(sender, false)
+    assert.deepEqual(nativeCalls.filter((call) => call[0] === 'focusable').at(-1), ['focusable', false], '页面说不用输入时才交还焦点')
+  })
+  test('pass-through is never enabled while geometry is stale', () => {
+    // 页面停止上报几何（DSH 接管后 pet.js 会 app.stop()）时，hitKind 一律返回 'none'。
+    // 若此时还允许穿透，WS_EX_TRANSPARENT 会盖住整个窗口 → 她身上也点不到，
+    // 拖动与按钮全废，而且日志里看不出来。真机事故（2026-10-13）就是这条。
+    cursor = { x: 320, y: 500 }
+    now += 5000            // 让几何过期（geometryUntil = 上报时间 + 1500）
+    tickPointer()
+    const lastIgnore = nativeCalls.filter((call) => call[0] === 'ignore').at(-1)
+    // 注意：比字段而不是比对象 —— deepStrictEqual 会连原型一起比，壳传来的 options
+    // 不是这个 realm 的字面量对象，值一样也会判不等（踩过一次）。
+    assert(lastIgnore, '至少发生了一次穿透状态更新')
+    assert.equal(lastIgnore[1], false, '几何过期时必须保持可交互（宁可挡鼠标也不能让她失联）')
+    assert.equal(lastIgnore[2] && lastIgnore[2].forward, true, '穿透时必须带 forward')
+  })
+  test('repeated input focus reports do not reconfigure the window or refocus it', () => {
+    ipc.get('pet-focus')(sender, { on: true })
+    const setters = nativeCalls.filter((call) => call[0] === 'focusable').length
+    const activations = nativeCalls.filter((call) => call[0] === 'focus').length
+    for (let i = 0; i < 100; i++) ipc.get('pet-focus')(sender, { on: true })
+    assert.equal(nativeCalls.filter((call) => call[0] === 'focusable').length, setters)
+    assert.equal(nativeCalls.filter((call) => call[0] === 'focus').length, activations)
+    win.focused = false; win.events.get('blur')()
+    ipc.get('pet-focus')(sender, { on: true })
+    assert.equal(win.isFocused(), false, 'background focus notifications must not steal foreground')
+    ipc.get('pet-focus')(sender, { on: true, activate: true })
+    assert.equal(win.isFocused(), true, 'clicking an already-active textarea must regain OS focus')
+    ipc.get('pet-focus')(sender, false)
+  })
+  test('IME composition keeps passthrough and focus stable until composition ends', () => {
+    snapshot(); ipc.get('pet-focus')(sender, true)
+    ipc.get('pet-composition')(sender, true)
+    cursor = { x: 0, y: 0 }
+    tickPointer(); ipc.get('pet-hover')(sender, { x: 10, y: 10 })
+    ipc.get('pet-focus')(sender, false)
+    assert.equal(ipc.get('handle:pet-diagnostics')(sender).focusInput, true)
+    assert.equal(nativeCalls.filter((call) => call[0] === 'ignore').at(-1)[1], false)
+    ipc.get('pet-composition')(sender, false); ipc.get('pet-focus')(sender, false); tickPointer()
+    assert.equal(nativeCalls.filter((call) => call[0] === 'ignore').at(-1)[1], true)
+  })
+  test('hide/show is idempotent, retains ownership, and recovers input without changing position', () => {
+    snapshot(); const before = win.getBounds()
+    ipc.get('shell-msg')(sender, 'hidden')
+    const messages = nativeCalls.filter((call) => call[0] === 'send' && call[1] === 'pet-visibility').length
+    for (let i = 0; i < 100; i++) ipc.get('shell-msg')(sender, 'hidden')
+    assert.equal(nativeCalls.filter((call) => call[0] === 'send' && call[1] === 'pet-visibility').length, messages)
+    assert.equal(win.isVisible(), true, 'collapse retains a native window for the recovery tab')
+    const tab = { x: 230, y: 490, w: 100, h: 32 }
+    ipc.get('pet-input')(sender, { collapsed: true, panels: [tab] })
+    cursor = { x: before.x + 280, y: before.y + 506 }; tickPointer()
+    assert.equal(nativeCalls.filter((call) => call[0] === 'ignore').at(-1)[1], false)
+    ipc.get('drag-start')(sender, { x: 280, y: 506 })
+    assert.equal(ipc.get('handle:pet-diagnostics')(sender).drag, true)
+    ipc.get('drag-end')(sender, { dx: 0, dy: 0 })
+    cursor = { x: before.x + 320, y: before.y + 420 }; tickPointer()
+    assert.equal(nativeCalls.filter((call) => call[0] === 'ignore').at(-1)[1], true, 'hidden model cannot intercept input')
+    now += 10000
+    assert.equal(serverOptions.ownerActive(), true, 'intentional hiding must not reactivate the DSH duplicate')
+    ipc.get('pet-focus')(sender, { on: true, activate: true })
+    assert.equal(ipc.get('handle:pet-diagnostics')(sender).focusInput, false)
+    trayClick()
+    assert.equal(win.isVisible(), true)
+    assert.deepEqual(win.getBounds(), before)
+    assert.equal(nativeCalls.filter((call) => call[0] === 'ignore').at(-1)[1], false, 'show must clear cached click-through')
+    snapshot(); cursor = { x: before.x + body.x + 150, y: before.y + body.y + 150 }; tickPointer()
+    ipc.get('drag-start')(sender, { x: 320, y: 490 })
+    assert.equal(ipc.get('handle:pet-diagnostics')(sender).drag, true)
+    ipc.get('drag-end')(sender, { dx: 0, dy: 0 })
+    const visibleMessages = nativeCalls.filter((call) => call[0] === 'send' && call[1] === 'pet-visibility').length
+    for (let i = 0; i < 100; i++) ipc.get('shell-msg')(sender, 'shown')
+    assert.equal(nativeCalls.filter((call) => call[0] === 'send' && call[1] === 'pet-visibility').length, visibleMessages)
   })
   test('idle roaming moves, and work/panels/hidden state stop movement', () => {
     cursor = { x: 0, y: 0 }; tickPointer()

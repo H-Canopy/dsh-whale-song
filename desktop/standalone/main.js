@@ -28,6 +28,8 @@ let pendingMove = null
 let moveTimer = null
 let lastIgnore = null
 let focusInput = false
+let composing = false
+let petHidden = false
 let rendererReady = false
 let lowPower = false
 let roam = null
@@ -86,14 +88,22 @@ function savePos() {
   try { writeJSON(path.join(app.getPath('userData'), 'pos.json'), savedPosition(win.getBounds(), body, areas())) } catch (err) { bootLog('position save: ' + err.message) }
 }
 function setIgnoreMouse(ignore) {
-  if (!validWin() || lastIgnore === ignore || (drag && ignore)) return
+  if (!validWin() || lastIgnore === ignore || ((drag || (composing && focusInput)) && ignore)) return
+  // 三道保险之一：**把每次切换记下来**。
+  // 真机事故（2026-10-13）：窗口卡在 WS_EX_TRANSPARENT=YES，于是整窗点击穿透，
+  // 她身上也拖不动，而日志里**一个字都没有** —— 完全看不出是穿透卡住了。
+  // 穿透是整窗样式，一旦卡住整个角色都失效，所以这个状态变化必须可见。
+  bootLog('passthrough ' + (ignore ? 'ON (click-through)' : 'OFF (interactive)'))
   win.setIgnoreMouseEvents(ignore, { forward: true })
   lastIgnore = ignore
 }
+// Missing/expired geometry cannot justify making the entire visible character unclickable.
+function geometryFresh() { return !!geometry && Date.now() < geometryUntil }
 function hitKind(x, y) {
   if (!geometry) return 'none'
   const inside = (r) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h
   if (geometry.panels.some(inside)) return 'panel'
+  if (petHidden) return 'none'
   const m = geometry.mask
   if (!inside(body)) return 'none'
   if (!m) return 'model'
@@ -111,6 +121,16 @@ function hitKind(x, y) {
 }
 function cancelRoam(delay = 20000) { roam = null; nextRoamAt = Date.now() + delay }
 function inputSnapshot(snapshot) {
+  // Hidden CSS transforms are not a new model anchor. Resume with a fresh snapshot on show.
+  if (petHidden) {
+    // Collapsing leaves a visible recovery tab; retain the model's saved anchor.
+    if (!snapshot || snapshot.collapsed !== true || !Array.isArray(snapshot.panels)) return
+    const panels = snapshot.panels.filter((r) => r && ['x', 'y', 'w', 'h'].every((k) => Number.isFinite(r[k]))
+      && r.w > 0 && r.h > 0 && r.w < 500 && r.h < 500).slice(0, 1)
+    geometry = { panels, mask: null, status: 'idle', roamBlocked: true }
+    geometryUntil = Date.now() + 1500
+    return
+  }
   if (!snapshot || !snapshot.body || !Array.isArray(snapshot.panels)) return
   const rect = (r) => r && ['x', 'y', 'w', 'h'].every((key) => Number.isFinite(r[key])) && r.w > 0 && r.h > 0 && r.w < 2000 && r.h < 2000
   if (!rect(snapshot.body)) return
@@ -140,7 +160,8 @@ function tickPointer() {
   const b = win.getBounds()
   const kind = hitKind(p.x - b.x, p.y - b.y)
   if (kind !== 'none') cancelRoam()
-  if (!drag) setIgnoreMouse(kind === 'none')
+  // Clear an already-enabled passthrough as well when geometry expires.
+  if (!drag) setIgnoreMouse(geometryFresh() ? kind === 'none' : false)
   if (!pointer || pointer.x !== p.x || pointer.y !== p.y) {
     pointer = p
     const display = screen.getDisplayNearestPoint(p).bounds
@@ -168,7 +189,7 @@ function endDrag(delta) {
   bootLog('drag-end')
 }
 function tickRoam() {
-  if (!validWin() || !win.isVisible() || !rendererReady || Date.now() > geometryUntil || lowPower
+  if (!validWin() || petHidden || !win.isVisible() || !rendererReady || Date.now() > geometryUntil || lowPower
     || !settings().roaming || drag || focusInput || !geometry || geometry.roamBlocked || geometry.status !== 'idle') return
   const now = Date.now()
   if (!roam) {
@@ -196,20 +217,52 @@ async function openDsh() {
   if (state.connected) await shell.openExternal(state.base + '/')
   else await dialog.showMessageBox(win, { type: 'info', title: '连接 DSH', message: '请先打开 DSH。桌宠会自动连接；你仍然可以在桌面上和她互动。' })
 }
-function showPet() {
+function setInputFocus(want, activate = false) {
+  if (!validWin() || (want && petHidden) || (!want && composing && !petHidden)) return
+  const changed = focusInput !== want
+  if (changed) {
+    focusInput = want
+    win.setFocusable(want)
+    bootLog('focus ' + (want ? 'ON' : 'off'))
+  }
+  if (want) {
+    cancelRoam()
+    setIgnoreMouse(false)
+    // focusin caused by win.focus() must not call win.focus()/setFocusable() again.
+    if (changed || activate) {
+      if (!win.isFocused()) win.focus()
+      win.webContents.focus()
+    }
+  }
+}
+function showPet(force = false) {
   if (!validWin()) return
-  win.showInactive()
+  if (!petHidden && win.isVisible() && !force) return
+  petHidden = false
+  geometryUntil = 0
+  lastIgnore = null
+  setIgnoreMouse(false)
+  if (!win.isVisible()) win.showInactive()
   win.setAlwaysOnTop(true, 'screen-saver')
-  win.webContents.executeJavaScript("document.querySelector('.dshp-root.dshp-hidden') && window.DSHPet && DSHPet.setHidden(false)").catch(() => {})
+  win.webContents.send('pet-visibility', true)
   cancelRoam()
   syncTrayMenu()
+  bootLog('visibility shown')
 }
 function hidePet() {
-  if (!validWin()) return
+  if (!validWin() || petHidden) return
+  petHidden = true
   endDrag()
-  win.hide()
+  savePos()
+  composing = false
+  setInputFocus(false)
+  geometry = null
+  geometryUntil = 0
+  setIgnoreMouse(false)
+  win.webContents.send('pet-visibility', false)
   cancelRoam()
   syncTrayMenu()
+  bootLog('visibility hidden')
 }
 function syncTrayMenu() {
   if (!tray) return
@@ -217,7 +270,7 @@ function syncTrayMenu() {
   const pref = settings().hostPref || 'auto'
   tray.setToolTip('鲸歌桌宠 · ' + (connected ? '已连接 DSH' : '独立陪伴'))
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: validWin() && win.isVisible() ? '隐藏桌宠' : '显示桌宠', click: () => validWin() && win.isVisible() ? hidePet() : showPet() },
+    { label: petHidden ? '展开大肥鱼' : '收起为大肥鱼', click: () => petHidden ? showPet() : hidePet() },
     { label: '自主漫游', type: 'checkbox', checked: !!settings().roaming, click: (item) => {
       updateSettings({ roaming: item.checked }); cancelRoam(item.checked ? 3000 : 20000); syncTrayMenu()
     } },
@@ -251,7 +304,7 @@ function registerIPC() {
     return { bounds, cursor, local, hit: hitKind(local.x, local.y), ignore: lastIgnore,
       body, panels: geometry && geometry.panels, mask: geometry && geometry.mask && {
         w: geometry.mask.w, h: geometry.mask.h, solid: geometry.mask.grid.reduce((sum, on) => sum + !!on, 0) },
-      drag: !!drag, rendererReady, geometryAge: Date.now() - (geometryUntil - 1500) }
+      drag: !!drag, focusInput, composing, collapsed: petHidden, visible: win.isVisible(), rendererReady, geometryAge: Date.now() - (geometryUntil - 1500) }
   })
   ipcMain.on('pet-trace', (event, point) => {
     if (!trusted(event) || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return
@@ -261,14 +314,14 @@ function registerIPC() {
   ipcMain.on('pet-input', (event, data) => { if (trusted(event)) inputSnapshot(data) })
   ipcMain.on('pet-hover', (event, point) => {
     if (!trusted(event) || drag || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return
-    const kind = hitKind(point.x, point.y)
-    if (kind !== 'none') cancelRoam()
-    setIgnoreMouse(kind === 'none')
+    // Forwarded renderer mouse coordinates can arrive late after moving/showing a window.
+    // Both input paths must use the current OS cursor, or they fight over click-through.
+    tickPointer()
   })
   ipcMain.on('drag-start', (event, point) => {
     if (!trusted(event) || !win.isVisible() || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y)
-      || hitKind(point.x, point.y) !== 'model') return
-    endDrag(); cancelRoam(); drag = beginDrag(win.getBounds()); setIgnoreMouse(false); bootLog('drag-start: hit=model')
+      || hitKind(point.x, point.y) !== (petHidden ? 'panel' : 'model')) return
+    endDrag(); cancelRoam(); drag = beginDrag(win.getBounds()); setIgnoreMouse(false); bootLog('drag-start: hit=' + (petHidden ? 'tab' : 'model'))
   })
   ipcMain.on('drag-move', (event, delta) => {
     if (!trusted(event) || !drag || !delta || !Number.isFinite(delta.dx) || !Number.isFinite(delta.dy)) return
@@ -278,9 +331,13 @@ function registerIPC() {
   ipcMain.on('drag-end', (event, delta) => { if (trusted(event)) endDrag(delta) })
   ipcMain.on('pet-focus', (event, on) => {
     if (!trusted(event)) return
-    focusInput = on === true
-    win.setFocusable(focusInput)
-    if (focusInput) { cancelRoam(); setIgnoreMouse(false); win.focus() }
+    const want = on === true || !!(on && on.on === true)
+    setInputFocus(want, !!(on && on.activate === true))
+  })
+  ipcMain.on('pet-composition', (event, on) => {
+    if (!trusted(event) || petHidden) return
+    composing = on === true
+    if (composing) setIgnoreMouse(false)
   })
   ipcMain.on('shell-msg', async (event, message) => {
     if (!trusted(event)) return
@@ -307,7 +364,8 @@ async function start() {
   link = createDshLink({ preference: () => settings().hostPref || 'auto' })
   await link.start()
   server = await startPetServer({ repoRoot: resolveRepoRoot(path.resolve(__dirname, '..', '..')), dshLink: link,
-    ownerPath: OWNER_PATH, ownerActive: () => rendererReady && Date.now() < geometryUntil && validWin() && link.status().connected })
+    ownerPath: OWNER_PATH, ownerActive: () => rendererReady && validWin() && link.status().connected
+      && (petHidden || geometryFresh()) })
   win = new BrowserWindow({
     width: WIN_W, height: WIN_H, frame: false, transparent: true, resizable: false,
     hasShadow: false, skipTaskbar: true, focusable: false, show: false, title: 'DS 鲸鱼娘桌宠',
@@ -326,14 +384,16 @@ async function start() {
     rendererReady = false; geometry = null
     win.webContents.executeJavaScript('window.DSHPet && DSHPet.setLowPower(' + lowPower + ')').catch(() => {})
   })
-  win.webContents.on('render-process-gone', () => { rendererReady = false; geometry = null; endDrag(); setIgnoreMouse(true) })
-  win.on('blur', () => { if (focusInput) { focusInput = false; win.setFocusable(false) } })
+  // 渲染进程挂了：几何全失效 → 强制可交互（别让她变成一块点不到的东西）
+  win.webContents.on('render-process-gone', () => { rendererReady = false; geometry = null; endDrag(); lastIgnore = null; setIgnoreMouse(false) })
+  // Keep DOM input eligibility across OS blur; a later click explicitly reactivates it.
+  win.on('blur', () => { composing = false })
   win.on('closed', () => { win = null; app.quit() })
   win.once('ready-to-show', () => { showPet(); bootLog('ready-to-show') })
   registerIPC()
   const icon = nativeImage.createFromPath(path.join(resolveRepoRoot(), 'desktop', 'windows', 'build', 'icon.png'))
   tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 16, height: 16 }))
-  tray.on('click', showPet)
+  tray.on('click', () => showPet(true))
   link.onChange((state) => { bootLog('DSH ' + (state.connected ? 'connected: ' + state.base : 'disconnected')); cancelRoam(); syncTrayMenu() })
   syncTrayMenu()
   claimOwner()
@@ -361,6 +421,6 @@ app.on('before-quit', () => {
 app.on('window-all-closed', () => app.quit())
 if (!app.requestSingleInstanceLock()) app.quit()
 else {
-  app.on('second-instance', showPet)
+  app.on('second-instance', () => showPet(true))
   app.whenReady().then(start).catch((err) => { bootLog(err.stack || err.message); dialog.showErrorBox('鲸歌桌宠启动失败', err.message); app.quit() })
 }
