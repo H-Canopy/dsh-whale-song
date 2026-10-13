@@ -32,23 +32,30 @@
 
 做的时候最费劲的是"分寸"这两个字：不能一直冒气泡刷屏、不能戳一下就生气、动作不能叠在一起变成面瘫。所以写了个调度器，同一时间只允许一张脸加一个动作；闲着的时候她自己换换视线、嘀咕两句，但不打扰我干活。
 
-一共三个版本，同一只鲸鱼娘、同一份插件：
+两种用法，同一只鲸鱼娘、同一份模型：
 
-· 网页版：装一条命令就行，Windows / Mac / Linux 都能用，她待在界面右下角
-· macOS 客户端：透明窗口贴在桌面上，永远置顶；鼠标压在她身上才挡得住点击，别的地方直接穿过去，不挡干活；收起会变成一个贴边的小圆球
-· Windows 客户端：和 Mac 同款体验，免安装，解压双击就行
+· 网页版：装一条命令就行，Windows / Mac / Linux 都能用，她待在 DSH 界面右下角
+· 桌面壳（Windows）：透明窗口贴在你桌面上，永远置顶；鼠标压在她身上才挡得住点击，
+  别的地方直接穿过去，不挡干活。**它自带本地服务，DSH 不开她也能独立待着** ——
+  模型、表情、动作、菜单全在，开着 DSH 才多出 agent 联动和音乐。
+  收起不是变成另一个小球，而是同一个窗口里收成一个小标签，点标签或托盘展开。
 
-原理其实不复杂：插件挂在 DeepSeek Harness 的 web 服务上，读的是 agent 真实的运行状态（思考、调工具、逐字输出、报错、收工），不是循环播放动画；客户端只是个透明窗口，加载同一个页面 —— 所以它特别小，也不带模型。少了插件，它只会显示"正在找 DSH…"。
+原理其实不复杂：**上游那份桌面客户端只是个透明窗口，去加载 DSH 插件提供的那一页** ——
+所以 DSH 一关，它只会显示"正在找 DSH…"，而且不带模型。
+我们这个 fork 把它改了：壳里自带一个本地服务，直接读仓库里的 `assets/pet.js`，
+**不再依赖 DSH 在不在跑**；DSH 在的时候再额外接上会话、钱包、音乐。
 
-模型是 B站 @氵六青 老师做的（角色形象 @上善无形 @ZipZipPipe），我只负责把她接进 DeepSeek，非商业使用，署名和许可都写在仓库最显眼的位置了。特别感谢原作者的分享，如果老师觉得哪里不合适，我立刻改或者撤下。
+模型是 B站 @氵六青 老师做的（角色形象 @上善无形 @ZipZipPipe）。
+插件本体（模型接入、表情动作调度、菜单、钱包）是上游 **Andersen216** 写的（MIT）；
+我在他基础上做的增量是：脱开 DSH 的桌面壳、点击穿透、自主漫游、音乐能力。
+非商业使用，署名和许可都写在仓库最显眼的位置了。特别感谢原作者的分享，
+如果老师觉得哪里不合适，我立刻改或者撤下。
 
-代码 MIT、模型部分 CC BY-NC-SA 4.0 非商业，完全免费开源，不收费、不带货。
+代码 MIT（原作者 Andersen216）、模型部分 CC BY-NC-SA 4.0 非商业，完全免费开源，不收费、不带货。
 
-下载和说明都在这儿：
+安装（桌面壳目前还没有预打包的安装包，要先自己构建；网页版一条命令就行）：
 网页版：dsh plugin --profile web add github:H-Canopy/dsh-whale-song
-Mac：https://github.com/H-Canopy/dsh-whale-song/releases/latest/download/DS-WhaleGirl-Pet-macOS.zip
-Windows：https://github.com/H-Canopy/dsh-whale-song/releases/latest/download/DS-WhaleGirl-Pet-Windows.zip
-一页讲清楚怎么装（含排错）：https://github.com/H-Canopy/dsh-whale-song
+仓库 / 源码 / 构建说明：https://github.com/H-Canopy/dsh-whale-song
 
 装完记得重启一次 DSH 她才出现。有问题、或者没装成功，评论区告诉我，我一条条回。也欢迎转给用 DeepSeek 的朋友 :)
 ```
@@ -86,10 +93,12 @@ Windows：https://github.com/H-Canopy/dsh-whale-song/releases/latest/download/DS
 ```
 老师好，打扰了 🙏
 
-我用您的鲸鱼娘模型做了一个 DeepSeek Harness 的桌宠插件（开源免费、非商业），
-做了三个版本：网页版、macOS 客户端、Windows 客户端。
+有人用您的鲸鱼娘模型做了一个 DeepSeek Harness 的桌宠插件（原作者 Andersen216，MIT），
+我在他基础上做了增强版 fork（开源免费、非商业）：除了 DSH 网页版，
+我另外做了 Windows 桌面壳 —— 自带本地服务、**DSH 不开她也能独立待在桌面上**。
 署名和许可（CC BY-NC-SA 4.0 非商业）都写在仓库最显眼的地方，
 角色形象的原作者 @上善无形 @ZipZipPipe 也标注了。
+Mac 桌面客户端是上游本来就有的，跟这个 fork 无关，我不冒领。
 
 我已经发了条动态介绍它：<把动态链接贴这里>
 
