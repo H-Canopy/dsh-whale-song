@@ -107,6 +107,18 @@ function setIgnoreMouse(ignore, why) {
 }
 // Missing/expired geometry cannot justify making the entire visible character unclickable.
 function geometryFresh() { return !!geometry && Date.now() < geometryUntil }
+/**
+ * 命中容差（CSS 像素）：可见像素周围多少距离内也算"在她身上"。
+ *
+ * 为什么是 14 而不是更小（原来 5）：真机实测（2026-10-13）把她的可点区域映射出来，
+ * 发现**只有约 240×160 CSS 且中间有洞** —— 她自己、本子、笔之间的缝隙全被判成空气，
+ * 鼠标落在缝隙里就穿透，表现就是"点不了、也拖不动"，而用户看着觉得"明明在她身上"。
+ * 容差太小的副作用（误判远处空气）远小于"抓不住她"。
+ *
+ * 注意：这个值**只扩张掩码的命中范围**，不会动窗口/渲染；
+ * 而且要配合 `inside(model)` 那道外框检查，所以不会延伸到整个窗口。
+ */
+const HIT_TOLERANCE_CSS = 14
 function hitKind(x, y) {
   if (!geometry) return 'none'
   const inside = (r) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h
@@ -118,9 +130,9 @@ function hitKind(x, y) {
   if (!m) return 'model'
   const gx = Math.floor((x - model.x) * m.w / model.w)
   const gy = Math.floor((y - model.y) * m.h / model.h)
-  // A few CSS pixels of tolerance around visible pixels; never enlarge the whole silhouette.
-  const rx = Math.max(1, Math.ceil(5 * m.w / model.w))
-  const ry = Math.max(1, Math.ceil(5 * m.h / model.h))
+  // 掩码格子 → CSS 像素的换算：把容差从 CSS 换回格子数
+  const rx = Math.max(1, Math.ceil(HIT_TOLERANCE_CSS * m.w / model.w))
+  const ry = Math.max(1, Math.ceil(HIT_TOLERANCE_CSS * m.h / model.h))
   for (let yy = Math.max(0, gy - ry); yy <= Math.min(m.h - 1, gy + ry); yy++) {
     for (let xx = Math.max(0, gx - rx); xx <= Math.min(m.w - 1, gx + rx); xx++) {
       if (m.grid[yy * m.w + xx]) return 'model'
