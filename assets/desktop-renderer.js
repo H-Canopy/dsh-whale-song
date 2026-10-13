@@ -9,7 +9,18 @@
   let nativeVisible = true
   let suppressTabClick = false
   let lastTap = null
-  const panelSelector = '.dshp-panel,.dshp-menu,.dshp-hud,.dshp-bubble,.dshp-composer,.dshp-dock,.dshp-tab,.dshp-mail'
+  // ⚠️ 这里**不能**放 `.dshp-bubble`（对话气泡）。
+  // 气泡是 `position:absolute; left:50%; bottom:100%` —— 悬在她**头顶上方居中**，而且是
+  // `pointer-events:auto`。而主进程的 hitKind 与渲染进程的 kind() 都是"**面板优先于她**"，
+  // 于是气泡一显示，点到气泡就变成点到面板 ⇒ **点不到她也拖不动她**。
+  // 真机事故（2026-10-13）就是这条：用户报"点不了、也拖不动了，刚刚还是好的" ——
+  // 气泡弹出来之后就失效，气泡消失又好了。
+  // 气泡纯显示文字、**没有任何自己的点击处理器**，会随 ttl 自动消失，所以直接让它穿透。
+  //
+  // ⚠️ 这里**也不能**放 `.dshp-tab`：「大肥鱼」恢复标签在收起态被放到她身体**底部居中**，
+  // 同样会跟她重叠并抢走点击。收起态只用 `collapsed: true` + 单独的 tab 矩形上报
+  // （见下面 report() 的提前返回分支），不需要它出现在这个集合里。
+  const panelSelector = '.dshp-panel,.dshp-menu,.dshp-hud,.dshp-composer,.dshp-dock,.dshp-mail'
   const rect = (el) => {
     const r = el.getBoundingClientRect()
     return { x: r.left, y: r.top, w: r.width, h: r.height }

@@ -36,6 +36,8 @@ let roam = null
 let nextRoamAt = Date.now() + 25000
 let pointer = null
 let geometryUntil = 0
+// 上一次上报的面板集合指纹：只在**变化时**打一行日志（见 inputSnapshot）。
+let lastPanelKey = null
 let shuttingDown = false
 let ownerEndpoint = ''
 let priorOwnerEndpoint
@@ -163,7 +165,18 @@ function inputSnapshot(snapshot) {
   const m = snapshot.mask
   const mask = m && Number.isInteger(m.w) && Number.isInteger(m.h) && m.w > 0 && m.h > 0 && m.w * m.h <= 65536
     && Array.isArray(m.grid) && m.grid.length === m.w * m.h ? m : geometry && geometry.mask
-  geometry = { panels: snapshot.panels.filter(rect).slice(0, 32), mask, model: rect(snapshot.model) ? snapshot.model : newBody, status: String(snapshot.status || 'idle'),
+  const panels = snapshot.panels.filter(rect).slice(0, 32)
+  // 面板集合**变化时**才记一行（低频）。
+  // 为什么需要：真机上出现过"点在看着空白的左上角，却被判成 hit=panel"，
+  // 而面板在 hitKind 里**优先于她本体** —— 若那些矩形是幽灵（不可见却仍上报），
+  // 就会**吃掉本该给她的点击**，表现就是"点不了"。有这行就能直接对账，
+  // 不用再靠坐标反推"那片到底是什么"。
+  const panelKey = panels.map((r) => Math.round(r.x) + ',' + Math.round(r.y) + ',' + Math.round(r.w) + 'x' + Math.round(r.h)).join(' | ')
+  if (panelKey !== lastPanelKey) {
+    lastPanelKey = panelKey
+    bootLog('panels ' + panels.length + (panels.length ? '  [' + panelKey + ']' : '  (none)'))
+  }
+  geometry = { panels, mask, model: rect(snapshot.model) ? snapshot.model : newBody, status: String(snapshot.status || 'idle'),
     roamBlocked: typeof snapshot.roamBlocked === 'boolean' ? snapshot.roamBlocked : snapshot.panels.length > 0 }
   if (typeof snapshot.lowPower === 'boolean') lowPower = snapshot.lowPower
   rendererReady = true
