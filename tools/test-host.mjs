@@ -15,7 +15,7 @@
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..')
@@ -144,7 +144,11 @@ const BASE = `http://127.0.0.1:${PORT}`
 
 console.log('\n宿主插件集成测试 (lib/index.js)\n')
 
-const mod = await import(path.join(ROOT, 'lib', 'index.js'))
+// Isolate token/config/usage files from the real DSH profile.
+const testHome = fs.mkdtempSync(path.join(process.env.TEMP || '/tmp', 'whale-host-'))
+process.on('exit', () => { try { fs.rmSync(testHome, { recursive: true, force: true }) } catch {} })
+process.env.DSH_HOME = testHome
+const mod = await import(pathToFileURL(path.join(ROOT, 'lib', 'index.js')).href)
 const plugin = mod.default
 check('模块导出 default 插件对象', !!plugin && typeof plugin.apply === 'function', plugin && plugin.name)
 check('inject 声明了 webServer 与 connection', Array.isArray(plugin.inject) && plugin.inject.includes('webServer') && plugin.inject.includes('connection'), (plugin.inject || []).join(','))
@@ -176,6 +180,7 @@ const get = async (p) => {
 const pet = await get('/dsh-pet/pet.js')
 check('pet.js 可取', pet.status === 200 && pet.buf.length > 10000, `${pet.buf.length} 字节, ${pet.type}`)
 check('pet.js 注入了 boot 配置', pet.buf.toString('utf8').includes('__DSH_PET_BOOT__'))
+check('boot 配置在前端读取前注入', pet.buf.toString('utf8').indexOf(';window.__DSH_PET_BOOT__=') < pet.buf.toString('utf8').indexOf('const BOOT = window.__DSH_PET_BOOT__'))
 
 const model3 = await get('/dsh-pet/model/c_0120.model3.json')
 check('model3.json 可取', model3.status === 200 && model3.type.includes('json'))

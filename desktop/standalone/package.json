@@ -1,8 +1,8 @@
 {
   "name": "dsh-whale-song-standalone",
   "productName": "DS-WhaleSong-Pet",
-  "version": "0.1.0",
-  "description": "鲸歌 · 独立桌宠壳：把 DS 鲸鱼娘放到桌面上（透明、置顶、点击穿透、贴边小球），**不需要 DSH 在运行**。她本体是同一套前端（assets/），音乐联动走 Windows 媒体会话（SMTC）。搭配 DSH 才是完整版（跟着 agent 干活 / 工作简报 / 钱包 / 点歌）。",
+  "version": "0.2.0",
+  "description": "鲸歌统一桌宠：一只桌面 Live2D 伙伴，自动连接 DSH，会话联动、透明区域穿透、自由拖放、可开关自主漫游；DSH 关闭时保留独立陪伴。",
   "main": "main.js",
   "author": "H-Canopy",
   "contributors": [
@@ -29,6 +29,8 @@
       "main.js",
       "server.cjs",
       "media-bridge.cjs",
+      "dsh-link.cjs",
+      "window-state.cjs",
       "preload.js",
       "ui/**",
       "package.json"
@@ -49,6 +51,10 @@
       {
         "from": "../../desktop/standalone/ui",
         "to": "dsh-whale-song/desktop/standalone/ui"
+      },
+      {
+        "from": "../windows/build/icon.png",
+        "to": "dsh-whale-song/desktop/windows/build/icon.png"
       },
       {
         "from": "../../AUTHORS.md",

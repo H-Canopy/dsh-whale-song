@@ -156,15 +156,15 @@ const shellSrc = fs.readFileSync(path.join(HERE, '..', 'desktop', 'standalone', 
 const shaperSrc = fs.readFileSync(path.join(HERE, '..', 'desktop', 'standalone', 'window-shape.mjs'), 'utf8')
 ok(/const SHELL_MASK_LIVE = !!window\.__DSHPET_SHELL__/.test(petSrc) && /MASK_REFRESH_MS/.test(petSrc), 'pet.js：壳模式下周期性重采掩码（否则掩码是一张定格快照）')
 ok(/SHELL_MASK_LIVE && !mask\.dirty && !mask\.building && performance\.now\(\) - mask\.lastBuild > MASK_REFRESH_MS/.test(petSrc), 'pet.js：postrender 里按间隔把掩码标脏', '')
-ok(/m\.bits\.length, hash\]/.test(uiSrc), 'ui/index.html：提交去重的 key 带掩码内容哈希（不只看 bits.length）')
+ok(/desktop-renderer\.js/.test(uiSrc) && !/fetch\('\/dsh-pet\/shape'/.test(uiSrc), 'ui/index.html：运行时用 IPC 命中网格，不向 Win32 提交裁剪区域')
 // maskInfo 必须给出**实体紧包围盒**（tight）：壳拿它做区域才贴她本人。
 // 只给画布矩形（含四周留白）会把一圈空气也裁成"可点"，死区白白变大。
 ok(/tight:\s*tight/.test(petSrc) && /const sx = r\.width \/ mask\.w/.test(petSrc),
   'pet.js：maskInfo() 给出实体的 tight 紧包围盒（CSS 像素）')
 ok(/shape\.tight && shape\.tight\.w > 0/.test(shaperSrc), 'window-shape：有 tight 就用 tight，没有才退回画布矩形')
 // 区域是物理像素、页面给的是 CSS/DIP → 必须 ×scaleFactor（实测窗口 422x602 DIP = 632x902 物理）。
-ok(/getScale: \(\) => \{/.test(shellSrc) && /scaleFactor/.test(shellSrc),
-  'main.js：把显示器 scaleFactor 交给成型器（CSS → 物理像素）')
+ok(!/createShaper/.test(shellSrc) && /setIgnoreMouseEvents/.test(shellSrc),
+  'main.js：运行时只用穿透，不混用窗口成型；成型器保留为独立诊断工具')
 ok(/const S = \(n\) => Math\.round\(n \* sc\)/.test(shaperSrc),
   'window-shape：区域坐标按 scale 换算成物理像素')
 
@@ -217,7 +217,7 @@ console.log('\n--- 尺寸稳定性（真机教训） ---')
 // 真机：窗口尺寸在多次拖动间累积增长（50 次 422→440）。实测 4 组对照后确定：
 // 拖动位置量化到**偶数**才不涨（量化到 1.5 的倍数仍涨 2px；只用 setPosition 会暴涨 60px）。
 // （shellSrc 已在上面页面侧那段读好了）
-ok(/const x2 = c\.x - \(c\.x % 2\), y2 = c\.y - \(c\.y % 2\)/.test(shellSrc),
+ok(/Math\.round\(n \/ 2\) \* 2/.test(fs.readFileSync(path.join(HERE, '..', 'desktop', 'standalone', 'window-state.cjs'), 'utf8')),
   '拖动位置量化到偶数（实测只有这样窗口尺寸才不涨 → 画布不 resize → 不闪）', '')
 
 sh.cleanup()

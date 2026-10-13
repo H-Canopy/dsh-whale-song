@@ -123,6 +123,13 @@ function startPetServer(opts) {
   const shellDir = path.join(repoRoot, 'desktop', 'standalone')
   const config = readDefaultConfig(repoRoot)
   const media = createMediaBridge()
+  const dshLink = o.dshLink || null
+  const eventClients = new Set()
+  const stopWatching = dshLink ? dshLink.onChange(() => {
+    // Force EventSource to reconnect to the new backend, including offline -> online.
+    for (const client of eventClients) client.end()
+    eventClients.clear()
+  }) : () => {}
   /**
    * 窗口成型的回调（由壳注入）。页面 POST /dsh-pet/shape 时调用。
    * 纯 Node 测试时不给 —— 那时接口返回 { ok:false, error:'unsupported' }，不影响其它功能。
@@ -145,6 +152,44 @@ function startPetServer(opts) {
     const url = new URL(req.url || '/', 'http://127.0.0.1')
     const p = url.pathname
     try {
+      // Reject cross-site writes. The only CORS endpoint is the read-only ownership probe.
+      const ownOrigin = 'http://' + req.headers.host
+      const origin = req.headers.origin
+      const localHost = /^127\.0\.0\.1:\d+$/.test(String(req.headers.host || ''))
+      if (!localHost) { json(res, 403, { ok: false, error: 'bad-host' }); return }
+      if (o.ownerPath && p === o.ownerPath && (req.method === 'GET' || req.method === 'OPTIONS')) {
+        const backend = dshLink && dshLink.status()
+        // Official DSH Desktop owns dsh-app://app (verified against its packaged main process).
+        const allowed = backend && backend.connected && (origin === backend.base || origin === 'dsh-app://app')
+        if (origin && !allowed) { json(res, 403, { ok: false }); return }
+        if (origin) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin') }
+        if (req.method === 'OPTIONS') {
+          if (!allowed || req.headers['access-control-request-method'] !== 'GET') { json(res, 403, { ok: false }); return }
+          res.setHeader('Access-Control-Allow-Methods', 'GET')
+          if (req.headers['access-control-request-private-network'] === 'true') res.setHeader('Access-Control-Allow-Private-Network', 'true')
+          res.writeHead(204).end()
+          return
+        }
+        json(res, 200, { active: !!(backend && backend.connected && o.ownerActive && o.ownerActive()) })
+        return
+      }
+      if (origin && origin !== ownOrigin) { json(res, 403, { ok: false, error: 'cross-origin' }); return }
+      if (req.headers['sec-fetch-site'] === 'cross-site') { json(res, 403, { ok: false, error: 'cross-site' }); return }
+      if (p === '/dsh-pet/connection') {
+        json(res, 200, dshLink ? dshLink.status() : { connected: false, base: null })
+        return
+      }
+      const proxyPaths = new Set(['/dsh-pet/state', '/dsh-pet/config', '/dsh-pet/events',
+        '/dsh-pet/hud', '/dsh-pet/say', '/dsh-pet/cancel', '/dsh-pet/control', '/dsh-pet/media',
+        '/dsh-whale/music.json', '/dsh-whale/music-file', '/dsh-whale/radio.json',
+        '/dsh-whale/radio-search', '/dsh-whale/radio-stream'])
+      if (dshLink && proxyPaths.has(p) && (req.method === 'GET' || req.method === 'POST')) {
+        if (p === '/dsh-pet/events') {
+          eventClients.add(res)
+          res.on('close', () => eventClients.delete(res))
+        }
+        if (dshLink.forward(req, res)) return
+      }
       // —— 媒体会话（复用宿主那份实现：白名单、过滤器校验、缓存都在里面）——
       if (p === '/dsh-pet/media') {
         const app = url.searchParams.get('app') || ''
@@ -179,6 +224,7 @@ function startPetServer(opts) {
         '/dsh-pet/media-smtc.js': path.join(assetsDir, 'media-smtc.js'),
         '/dsh-pet/media-local.js': path.join(assetsDir, 'media-local.js'),
         '/dsh-pet/media-bridge.js': path.join(assetsDir, 'media-bridge.js'),
+        '/dsh-pet/desktop-renderer.js': path.join(assetsDir, 'desktop-renderer.js'),
       }
       if (scriptMap[p]) { serveFile(res, scriptMap[p]); return }
 
@@ -201,10 +247,11 @@ function startPetServer(opts) {
           'Cache-Control': 'no-store',
           Connection: 'keep-alive',
         })
-        try { res.write(': standalone\n\n') } catch (err) {}
+        try { res.write('data: {"t":"hello","status":"idle","sessionId":null,"standalone":true}\n\n') } catch (err) {}
         const ping = setInterval(() => { try { res.write(': ping\n\n') } catch (err) {} }, 25000)
-        const done = () => { clearInterval(ping); try { res.end() } catch (err) {} }
-        req.on('close', done)
+        eventClients.add(res)
+        const done = () => { clearInterval(ping); eventClients.delete(res); try { res.end() } catch (err) {} }
+        res.on('close', done)
         req.on('error', done)
         return
       }
@@ -268,7 +315,12 @@ function startPetServer(opts) {
         petBase: 'http://127.0.0.1:' + port,
         repoRoot: repoRoot,
         media: media,
-        close: () => { try { server.close() } catch (err) {} },
+        close: () => {
+          stopWatching()
+          for (const client of eventClients) client.end()
+          eventClients.clear()
+          try { server.close(); server.closeAllConnections() } catch (err) {}
+        },
       })
     })
   })

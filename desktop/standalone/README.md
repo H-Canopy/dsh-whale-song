@@ -1,105 +1,53 @@
-# 鲸歌 · 独立桌宠壳（Windows）
+# 鲸歌统一桌宠（Windows）
 
-> 把 DS 鲸鱼娘放到**桌面上**：透明、置顶、点击穿透、贴边悬浮球。
-> **不需要 DSH 在运行** —— 壳自带一个只监听 `127.0.0.1` 的迷你服务（静态资源 + 媒体会话）。
+桌面上只保留一只鲸鱼娘：自由拖放、透明区域点击穿透、可开关自主漫游、托盘显示/隐藏。她自动连接本机 DSH，沿用 DSH 插件的会话事件、气泡、钱包、音乐服务与对话入口。
 
-```
-dsh-whale-song/
-├── desktop/standalone/      ← 这个壳（Electron）
-│   ├── main.mjs             窗口/托盘/穿透/贴边球（改自上游 desktop/windows，MIT）
-│   ├── server.mjs           本地迷你服务：/dsh-pet/* 静态资源 + 媒体会话（复用 lib/media-bridge.mjs）
-│   ├── ui/index.html        壳里的页面（她本体，全透明）
-│   └── preload.js           给页面补 macOS 那套桥，让前端一行不用改
-├── assets/                  她本体（模型/运行时/前端脚本）
-└── lib/media-bridge.mjs     媒体会话桥（与 DSH 宿主**共用同一份**）
+## 启动
+
+在仓库根目录运行：
+
+```sh
+npm install
+npm run desktop:start
 ```
 
-## 跑起来（开发）
+启动器自动清除子进程的 `ELECTRON_RUN_AS_NODE`，不会更改用户或系统环境变量。重复启动只唤出已有桌宠，不创建第二只。旧的 `desktop/windows` 入口也转向同一实例。
 
-```powershell
-cd D:\Plugins\dsh-whale-song\desktop\standalone
-pnpm install          # 首次：会下载 Electron（约 100MB）
-pnpm start
+首次从旧版升级，请刷新一次 DSH 界面，使它读取更新后的前端脚本。桌宠会把自己的存活探测地址写入 `$DSH_HOME/dsh-live2d-pet.json` 的 `desktopEndpoint`，保留原有配置。DSH 页面通过已有的 `/dsh-pet/config` 热读取它，无需新增宿主路由。
+
+桌面角色就绪并连接 DSH 后，DSH 页面暂停自己的模型和事件流，不再显示重复角色。桌宠退出、断连、渲染进程失去响应或崩溃后，页面自动恢复；仅凭一个遗留文件不会一直隐藏角色。正常退出清理自己的探测地址。
+
+## 交互
+
+- 在角色可见部分按下并拖动，搬动桌面窗口；面板、工具栏与透明区域不发起拖动。
+- 鼠标经过透明区域时点击落到下面的窗口。原生鼠标移动与 40ms 全局光标检查共同更新穿透状态；状态不变时不调用 `setIgnoreMouseEvents`，拖动中保持可交互。
+- 通常不抢键盘焦点；点击输入框时临时允许聚焦，失去焦点后恢复。
+- 工具栏 `–` 与托盘都可隐藏她；托盘点击可找回。
+- 托盘「自主漫游」立即开关并保存。默认开启，空闲一段时间后平滑移动；靠近角色、拖动、打开面板、打字、DSH 工作、隐藏或低性能模式都会暂停。
+- 当前模型是一套坐姿 Live2D 场景，漫游表现为整体平滑移动，没有虚构新的行走动画。
+- 位置存角色在屏幕上的锚点，兼容旧 `[x,y]`，启动、变更分辨率或拔掉屏幕后恢复到可见工作区。
+
+## 连接与独立模式
+
+优先读取 `$DSH_HOME/dsh-live2d-pet-desktop.json` 中实际端口与通行证，验证 `/dsh-pet/state` 后才连接。托盘可指定桌面版/网页版，自动模式保持已有连接，避免无故切换会话。每三秒检查并自动重连。
+
+桌面页面始终使用一个本机服务地址，因此 DSH 重启不会切换 localStorage，表情、布局等前端设置得以保留。代理只转发固定路由，凭证仅留在主进程，拒绝跨站写请求。
+
+DSH 关闭时仍可显示模型、换表情/道具、拖动和漫游、读取系统媒体会话。会话、钱包、说话与本地音乐/电台服务需要 DSH，恢复连接后重新可用。
+
+日志与位置：`%APPDATA%/DS-WhaleSong-Pet/boot.log`（UTF-8）、`pos.json`。壳设置在同目录 `settings.json`，包括 `roaming`、`lowPower`、`hostPref`。旧 `shapeWindow` 与 `fullscreenPrimary` 不再驱动运行时；窗口成型源码仅保留为独立诊断工具。
+
+## 源码与验证
+
+见 `tools/shell-gen/README.md`。主进程与 preload 改模板再生成。
+
+```sh
+npm run desktop:generate
+node tools/test-all.mjs
 ```
 
-跑起来后：她出现在主屏右下角，**背景全透明**；空白处的鼠标事件会**穿透**到下面的窗口；
-托盘图标可以显示/隐藏/退出；工具栏还能「收起成悬浮小球」。
+窗口行为测试执行真实主进程入口并隔离用户数据；DSH 代理测试使用真实 HTTP/SSE；单实例归属测试用真实 Chromium 验证退出和崩溃恢复。OS 层鼠标穿透和真人拖动手感仍需在 Windows 桌面复测，注入的浏览器事件不能代替这一层。
 
-## 打包成安装包
+## 许可
 
-```powershell
-pnpm dist             # 产出 DS-WhaleSong-Pet-Windows-Setup.exe（NSIS）
-```
-
-⚠️ 没做代码签名：**发出去别人装的时候 Windows SmartScreen 会拦**（"未知发布者"），
-要点"更多信息 → 仍要运行"。这是所有小项目发桌面端的通病，绕不过去。
-
-## 独立模式有什么 / 没有什么
-
-| 能力 | 独立壳 | 搭配 DSH（插件版） |
-| --- | --- | --- |
-| 桌面透明置顶、点击穿透、托盘、贴边球 | ✅ | ✅ |
-| 模型渲染 / 物理 / 眨眼 / 视线跟随 | ✅ | ✅ |
-| 菜单：表情 · 装饰 · 场景 · 动作 | ✅ | ✅ |
-| **知道你在放什么歌 → 换表情/演动作** | ✅（直读 Windows 媒体会话，任何播放器都行） | ✅ |
-| 音乐页：列出播放器 · 上下首 · 播放暂停 | ✅ | ✅ |
-| 本地音乐（歌单/播放/选文件夹） | ✅ | ✅ |
-| 点歌（说"放周杰伦的晴天"） | ❌ | ✅ |
-| 跟着 agent 干活（思考/读文件/完成/报错） | ❌ | ✅ |
-| 工作简报社（头顶信箱）、内心想法气泡 | ❌ | ✅ |
-| 右键钱包（余额/本轮消耗） | ❌ | ✅ |
-| 跟她说话（把话送进会话） | ❌ | ✅ |
-
-一句话：**独立壳 = 桌面级的"看脸 + 会跟着音乐动"；搭配 DSH 才是完整版。**
-
-## 它到底怎么脱离 DSH 的（实现要点）
-
-1. **不找宿主，自己当宿主**：迷你服务把前端写死的 `/dsh-pet/*` 补齐 ——
-   `pet.js`、`config`、`model/**`、`vendor/**`、`media`、`state`、`events`。
-   上游壳里那套"扫端口找 DSH"的逻辑因此**自己就找到了我们的服务**（它探的就是 `/dsh-pet/pet.js`），
-   所以窗口/托盘那 600 行**一行没改**。
-2. **媒体会话共用实现**：`lib/media-bridge.mjs` 是宿主与壳共用的同一份（命令白名单、
-   app 过滤器校验、短缓存、toggle 翻译都在里面），调用的是同一个 `lib/smtc-helper.ps1`。
-   两边各写一份必然漂移，所以只留一处。
-3. **不要通行证**：DSH 插件的 `/dsh-pet/*` 有过信任栅栏（要 DSH 会话 cookie），
-   我们自己的服务只绑 `127.0.0.1`、没有栅栏，所以壳里那段读 token 的逻辑直接短路。
-4. **DSH 专属接口就是 404**：`hud` / `say` / `control` / `cancel` 在独立模式下没有，
-   前端对这些失败本来就有兜底（安静降级，不报错、不刷屏）。
-5. **"打开 DSH"按钮说人话**：独立模式下点了会探一下有没有 DSH 在跑；没有就弹一个说明框
-   （告诉她完整版要装插件），而不是打开一个错误页。
-
-## 许可与署名（硬义务）
-
-- 代码 **MIT**：上游壳与桌宠 © **Andersen216**；本壳的独立化改造 © **H-Canopy**。
-- 角色形象 **CC BY-NC-SA 4.0（非商业）**：© **上善无形**（原作 OC「溟月」）·
-  **ZipZipPipe**（女仆鲸鱼娘二次设计）· **氵六青**（Live2D 模型）。
-- 本项目完全免费、不商业化。详见仓库根目录 `AUTHORS.md` / `NOTICE.md`。
-
-## 验证
-
-```powershell
-# 壳的本地服务（不需要 Electron，纯 Node 就能验）
-node tools/test-shell-server.mjs      # 18/18：资源在位 / 媒体会话可读 / 真浏览器渲染出她
-# 浏览器版的单机 demo 页
-node tools/test-standalone.mjs        # 13/13
-# 仓库全量
-node tools/test-all.mjs               # 12 组
-```
-
-**窗口本身**（透明/置顶/穿透/托盘）只有 Electron 能验 —— 需要先 `pnpm install` 下 Electron 再 `pnpm start`。
-本机实测（`pnpm install` 后用 `node_modules/electron/dist/electron.exe .` 启动）：
-`boot.log` 记录 `本地服务已起 → petBase=http://127.0.0.1:63675 → 加载本地页面 → 主窗口已创建 → 托盘已创建 → ready-to-show: 窗口即将显示`，
-即**完全没连 DSH**。窗口参数另有打桩测试逐条断言（`node tools/test-shell-window.mjs`，19/19）。
-
-### ⚠️ 一个只在 DSH 会话里会踩的坑：`ELECTRON_RUN_AS_NODE=1`
-
-DSH 给子进程注入了 `ELECTRON_RUN_AS_NODE=1`（不是用户级/机器级环境变量）。有它的时候，
-Electron 会**退化成纯 Node**：`require('electron')` 返回的是"可执行文件路径"字符串、`app` 是 undefined，
-启动直接崩，boot.log 里只有一句 `Cannot read properties of undefined (reading 'whenReady')`。
-
-- **普通用户双击安装包不会有这个问题**（那个变量只存在于 DSH 会话的进程环境里）。
-- 但如果你在 DSH 的终端里起壳调试，要先清掉它：
-  ```powershell
-  Remove-Item Env:\ELECTRON_RUN_AS_NODE
-  ```
-- 测试脚本已经自动清掉它（见 `tools/test-shell-window.mjs` 里的说明）。
+上游插件及 Windows 外壳 © Andersen216，MIT；本项目增量 © H-Canopy，MIT。角色 © 上善无形 / ZipZipPipe；Live2D 模型 © 氵六青，CC BY-NC-SA 4.0。完整许可与署名见根目录 `AUTHORS.md`、`NOTICE.md`、`LICENSE`。

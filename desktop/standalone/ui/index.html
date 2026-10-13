@@ -1,67 +1,17 @@
 <!doctype html>
 <html lang="zh">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DS 鲸鱼娘桌宠</title>
-<!--
-  独立桌宠壳里的页面（Electron 窗口用）。
-  与 standalone/index.html 的区别：那一份是给**浏览器里看 demo** 的（带说明表），
-  这一份是**她本体** —— 全透明背景，只有她，窗口无边框、置顶、点击穿透。
-
-  需要的资源都从同一个本地迷你服务（desktop/standalone/server.mjs）取：
-  pet.js 自己会按 BASE 去拿 vendor/ 与 model/，媒体会话走 /dsh-pet/media。
-  DSH 专属能力（事件流/钱包/说话）在这个模式下没有，前端会安静降级。
--->
-<style>
-  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DS 鲸鱼娘桌宠</title>
+  <style>html,body{margin:0;height:100%;background:transparent;overflow:hidden}</style>
 </head>
 <body>
-<script>
-  // 基址就是本机迷你服务（同源），保持默认 /dsh-pet 即可
-  window.__DSH_PET_BOOT__ = { config: { enabled: true }, standalone: true }
-</script>
-<!-- 与 DSH 宿主注入的那一套保持一致（宿主是往 index.html 里注入这三个 + pet.js）：
-     pet.js 本体 · media-smtc 统一层（读/遥控系统媒体会话）· media-local 本地音乐 · media-bridge 让她跟着音乐动 -->
-<script src="/dsh-pet/pet.js"></script>
-<script src="/dsh-pet/media-smtc.js"></script>
-<script src="/dsh-pet/media-local.js"></script>
-<script src="/dsh-pet/media-bridge.js"></script>
-<script>
-  // —— 窗口成型：把命中掩码交给壳，让窗口裁成她的轮廓 ——
-  // 这样"鼠标在不在她身上"由**窗口几何**决定：轮廓外根本不算窗口（点击直接落到下面的窗口），
-  // 轮廓内永远可点 —— 取代了以前那套 90ms 轮询 + setIgnoreMouseEvents（会漏掉快速按下，
-  // 也就是"有时候抓不住她"）。接口只由 desktop/standalone/server.mjs 提供。
-  (function () {
-    var lastKey = ''
-    var stopped = false
-    function tick() {
-      if (stopped || !window.DSHPet || typeof window.DSHPet.maskInfo !== 'function') return
-      var m = null
-      try { m = window.DSHPet.maskInfo() } catch (e) { m = null }
-      if (!m || !m.bits) return
-      // key 必须带「内容」：只看 bits.length 的话，轮廓变了但 PNG 字节数恰好相同就会被当成没变而漏提交
-      var hash = 0
-      for (var i = 0; i < m.bits.length; i += 3) hash = (hash * 31 + m.bits.charCodeAt(i)) | 0
-      var key = [m.gw, m.gh, m.x, m.y, m.w, m.h, m.bits.length, hash].join(',')
-      if (key === lastKey) return
-      lastKey = key
-      try {
-        fetch('/dsh-pet/shape', {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(m),
-        }).then(function (r) { return r.json() }).then(function (j) {
-          // 壳不支持（比如在纯浏览器里打开）就停掉，不再打扰
-          if (j && j.ok === false && j.error === 'unsupported') stopped = true
-        }).catch(function () { lastKey = '' })
-      } catch (e) { lastKey = '' }
-    }
-    setTimeout(tick, 1200)
-    setInterval(tick, 1500)
-  })()
-</script>
+  <script>window.__DSH_PET_BOOT__={config:{enabled:true},desktop:true}</script>
+  <script src="/dsh-pet/pet.js"></script>
+  <script src="/dsh-pet/media-smtc.js"></script>
+  <script src="/dsh-pet/media-local.js"></script>
+  <script src="/dsh-pet/media-bridge.js"></script>
+  <script src="/dsh-pet/desktop-renderer.js"></script>
 </body>
 </html>

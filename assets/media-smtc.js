@@ -186,7 +186,7 @@
     })
   }
 
-  function tick() { if (enabled()) load(true); }
+  function tick() { if (!window.__DSH_DESKTOP_OWNED__ && enabled()) load(true); }
 
   var api = {
     now: now,

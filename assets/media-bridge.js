@@ -138,6 +138,7 @@
   // 音源优先级：统一层（系统媒体会话）→ 挂件接口 → 挂件宿主路由。
   // 统一层放最前是因为它**不依赖任何插件**；设置里关掉它时 enabled() 会拦住，行为回到从前。
   function tick() {
+    if (window.__DSH_DESKTOP_OWNED__) return
     if (bridgeOff()) return
     var sys = readSystem()
     if (sys) { apply(sys); return }

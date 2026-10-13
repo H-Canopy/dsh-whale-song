@@ -1,6 +1,6 @@
 {
   "name": "dsh-whale-song",
-  "version": "0.4.6-song.2",
+  "version": "0.4.7-song.1",
   "description": "鲸歌（dsh-whale-song）：上游 dsh-whale-girl-live2d 的增强版 fork —— Live2D 鲸鱼娘桌宠（跟着 agent 状态换表情动作）+ 我们额外接入的本地音乐 / 在线电台 / 网易云联动。点一下跟她说话，右键菜单换表情·换装·摆场景·演动作，还能让她给你放歌。（Whale Girl Pet + music: a Live2D companion for the DeepSeek Harness Web UI. Model assets are non-commercial, CC BY-NC-SA 4.0.）",
   "keywords": [
     "dsh",
@@ -21,6 +21,8 @@
     "docs",
     "skill",
     "sources",
+    "desktop/standalone",
+    "desktop/windows/build",
     "tools",
     "cordis.patch.yml",
     "README.md",
@@ -47,7 +49,8 @@
     "test:shell": "node tools/test-shell-window.mjs",
     "standalone": "node tools/serve-standalone.mjs",
     "desktop:install": "pnpm install",
-    "desktop:start": "electron desktop/standalone",
+    "desktop:start": "node tools/start-desktop.mjs",
+    "desktop:generate": "node tools/shell-gen/make-shell-cjs-server.mjs && node tools/shell-gen/make-standalone-shell.mjs",
     "desktop:dist": "electron-builder --win --x64 --publish never",
     "smoke": "node tools/smoke.mjs",
     "shot": "node tools/shot.mjs",

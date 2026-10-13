@@ -1,5 +1,7 @@
 # 桌面版（Windows）· Desktop shell for Windows
 
+> **本 fork 的 Windows 入口已统一**：`main.js` 转发到 `desktop/standalone/main.js`，两种启动路径共用一个实例。请在仓库根目录运行 `npm run desktop:start`，完整现状见 [`../standalone/README.md`](../standalone/README.md)。下面保留上游历史说明。
+
 > **和 macOS 版是同一个东西的两个平台实现**：她本身还是那份 DSH 插件
 > （模型、联动、菜单、钱包全在插件里），这里只是一个**透明、无边框、永远置顶**的窗口，
 > 加载插件提供的那一页。

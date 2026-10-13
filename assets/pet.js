@@ -33,6 +33,11 @@
   window.__DSH_PET_LOADED__ = true
 
   const BOOT = window.__DSH_PET_BOOT__ || {}
+  let desktopOwned = false
+  let mainStarted = false
+  let ownerProbeBusy = false
+  let sseConnection = null
+  let sseRetryTimer = null
   const CFG = Object.assign(
     {
       height: 180, // 桌宠是常驻挂件：默认约原来 1/3 的占地面积
@@ -1497,6 +1502,12 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     // buildUI 以前在 try 外面——它一旦抛异常，整页会静默什么都不显示，
     // 排查很痛苦。现在整个启动过程都在保护里，并且把错误挂到 window 上。
     try {
+      if (!window.__DSHPET_SHELL__ && !BOOT.standalone && BASE === '/dsh-pet') {
+        await checkDesktopOwner()
+        if (desktopOwned) return
+      }
+      if (mainStarted) return
+      mainStarted = true
       injectStyle()
       ui = buildUI()
       await loadRuntime()
@@ -1537,6 +1548,47 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
         }
       } catch (e) {}
     }
+  }
+
+  // The DSH page yields its renderer to the desktop instance while its live endpoint exists.
+  // The endpoint is read through the existing hot config route, so no DSH restart is required.
+  async function checkDesktopOwner() {
+    if (window.__DSHPET_SHELL__ || BOOT.standalone || BASE !== '/dsh-pet' || ownerProbeBusy) return
+    ownerProbeBusy = true
+    let owned = false
+    try {
+      const response = await fetch(BASE + '/config', { cache: 'no-store', signal: AbortSignal.timeout(1200) })
+      if (!response.ok) throw new Error('config unavailable')
+      const config = await response.json()
+      if (typeof config.desktopEndpoint === 'string') {
+        const endpoint = new URL(config.desktopEndpoint)
+        if (endpoint.protocol === 'http:' && endpoint.hostname === '127.0.0.1' && endpoint.port
+          && !endpoint.username && !endpoint.password && /^\/dsh-pet\/owner\/[a-f0-9-]+$/.test(endpoint.pathname)) {
+          const lease = await fetch(endpoint.href, { cache: 'no-store', credentials: 'omit', signal: AbortSignal.timeout(1200) })
+          owned = lease.ok && (await lease.json()).active === true
+        }
+      }
+    } catch {}
+    finally { ownerProbeBusy = false }
+    if (owned === desktopOwned) return
+    desktopOwned = owned
+    window.__DSH_DESKTOP_OWNED__ = owned
+    document.documentElement.classList.toggle('dshp-desktop-owned', owned)
+    if (!document.getElementById('dshp-owner-style')) {
+      const style = document.createElement('style')
+      style.id = 'dshp-owner-style'
+      style.textContent = '.dshp-desktop-owned .dshp-root,.dshp-desktop-owned .dshp-tab{display:none!important}'
+      document.head.appendChild(style)
+    }
+    if (owned) {
+      if (app) app.stop()
+      clearTimeout(sseRetryTimer)
+      if (sseConnection) sseConnection.close()
+      sseConnection = null
+    } else if (mainStarted && app) {
+      app.start()
+      connectSSE()
+    } else if (document.readyState !== 'loading') main()
   }
 
   function injectStyle() {
@@ -2424,7 +2476,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     const talkBtn = $('button', 'dshp-btn dshp-primary', '💬 说话')
     const menuBtn = $('button', 'dshp-btn', '⋯')
     const hideBtn = $('button', 'dshp-btn', '–')
-    hideBtn.title = '收起（桌面版会缩成贴边小球）'
+    hideBtn.title = shell.on ? '隐藏桌宠（点击托盘可找回）' : '收起桌宠'
     // 主人要的：一键打开 DeepSeek Harness，纯符号不写字
     const openBtn = $('button', 'dshp-btn dshp-icon', '↗')
     openBtn.title = '打开 DeepSeek Harness 界面'
@@ -4369,10 +4421,14 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
   }
 
   function connectSSE() {
+    clearTimeout(sseRetryTimer)
+    if (sseConnection) sseConnection.close()
     let es = null
     let retry = 0
     const open = () => {
+      if (desktopOwned) return
       es = new EventSource(BASE + '/events')
+      sseConnection = es
       es.onopen = () => {
         retry = 0
         log('事件流已连接')
@@ -4395,7 +4451,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
           es.close()
         } catch (e) {}
         retry++
-        setTimeout(open, Math.min(10000, 800 * retry))
+        sseRetryTimer = setTimeout(open, Math.min(10000, 800 * retry))
       }
     }
     open()
@@ -4412,6 +4468,14 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     switch (m.t) {
       case 'hello':
         agent.status = m.status || 'idle'
+        if (agent.status === 'idle') {
+          endWork()
+          rig.talking = false
+          setBase('neutral', IDLE_PROPS)
+        } else if (agent.status === 'thinking' || agent.status === 'tool') {
+          startWork()
+          setBase('thinking', WORK_PROPS)
+        }
         break
 
       case 'user':
@@ -4836,6 +4900,23 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     clearProps,
     playMotion,
     hitTest,
+    inputSnapshot: (previousBuild) => {
+      const stage = app && app.view && app.view.parentElement
+      if (!stage || !mask.grid || !mask.w || !mask.h) return null
+      const r = stage.getBoundingClientRect()
+      return {
+        body: { x: r.left, y: r.top, w: r.width, h: r.height },
+        maskAt: mask.lastBuild,
+        mask: previousBuild === mask.lastBuild ? null : { w: mask.w, h: mask.h, grid: Array.from(mask.grid) },
+      }
+    },
+    trackDesktopCursor: (x, y) => {
+      if (!Number.isFinite(x) || !Number.isFinite(y) || desktopOwned) return
+      gaze.pointer.x = x * window.innerWidth
+      gaze.pointer.y = y * window.innerHeight
+      gaze.pointer.seen = true
+      gaze.pointer.at = performance.now()
+    },
     /**
      * 只读拿到命中掩码的**原始网格**（调试用：把它打出来和画面对齐比较）。
      * 壳那边判断"按在她身上没有"全靠这张掩码，一旦它和实际渲染错位，
@@ -4931,7 +5012,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       if (print) { try { console.table(dshwRightLog) } catch (err) { console.log(dshwRightLog) } }
       return dshwRightLog.slice()
     },
-    /** 隐藏 / 恢复。壳子（桌面版）收起成小球后，靠它把页面里的状态一起改回来 */
+    /** 隐藏 / 恢复。桌面壳通过托盘找回角色时也恢复页面状态。 */
     setHidden,
     /** 壳子告诉页面「你记着的连接档位是哪一档」（设置页据此高亮） */
     setHostPref: (v) => {
@@ -5129,7 +5210,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
             }
           }
           return {
-            headX: Math.round(headScreenX()),
+            headX: ui && ui.root ? Math.round(headScreenX()) : null,
             rootCenter: ui && ui.root ? Math.round(ui.root.getBoundingClientRect().left + ui.root.getBoundingClientRect().width / 2) : null,
             menu: read(ui && ui.menu && ui.menu.el),
             composer: read(ui && ui.composer && ui.composer.el),
@@ -5348,6 +5429,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
   }
   try { setInterval(dshwSongSpendTick, 5000) } catch (err) {}
 
+  if (!window.__DSHPET_SHELL__ && !BOOT.standalone && BASE === '/dsh-pet') setInterval(checkDesktopOwner, 2500)
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', main)
   else main()
 })()

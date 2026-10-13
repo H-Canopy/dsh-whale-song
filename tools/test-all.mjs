@@ -17,6 +17,7 @@ const LIVE = process.argv.includes('--live')
 
 // 顺序：宿主路由 → 统一层前端 → 媒体桥 → 页签 → 本地音乐/电台服务 → 偏好/花费 → 音源适配器
 const SUITES = [
+  ['宿主插件集成', 'test-host.mjs'],
   ['宿主路由 /dsh-pet/media', 'test-media-route.mjs'],
   ['统一层前端 media-smtc', 'test-media-smtc.mjs'],
   ['媒体桥 media-bridge', 'test-media-bridge.mjs'],
@@ -30,6 +31,8 @@ const SUITES = [
   ['单机模式（无后端）', 'test-standalone.mjs'],
   ['独立壳的本地服务', 'test-shell-server.mjs'],
   ['独立壳的窗口逻辑', 'test-shell-window.mjs'],
+  ['DSH 合并与自动重连', 'test-dsh-link.mjs'],
+  ['单实例归属与崩溃恢复', 'test-desktop-owner.mjs'],
   ['独立壳的窗口成型', 'test-shell-shape.mjs'],
   ['右键双击音乐（统一层接线）', 'test-rightclick-media.mjs'],
   ['不依赖挂件', 'test-no-widget-required.mjs'],

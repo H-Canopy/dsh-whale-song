@@ -1,6 +1,8 @@
 <!-- SONG-NOTE-START （本 fork 的定位与归属；上游文档从下一段开始） -->
 > # 🐋 鲸歌 · dsh-whale-song
 >
+> **2026-10-13：Windows 统一桌宠已接入。** `npm run desktop:start` 启动桌面上的同一只鲸鱼娘：自由拖放、透明区域穿透、可开关自主漫游，并自动连接 DSH 的会话、钱包和音乐能力。桌面接管后，DSH 页面暂停重复模型；退出或断连后自动恢复。旧版升级刷新一次 DSH 界面。详见 [`desktop/standalone/README.md`](desktop/standalone/README.md)。
+>
 > **= 上游桌宠 + 我们接入的音乐能力。** 在上游 [Andersen216/dsh-whale-girl-live2d](https://github.com/Andersen216/dsh-whale-girl-live2d)（MIT）基础上，让她**真的懂音乐**：
 >
 > | 能力 | 怎么实现的 |
