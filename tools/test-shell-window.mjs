@@ -84,6 +84,7 @@ class FakeWindow {
       focus: () => nativeCalls.push(['webFocus']),
       on: (name, fn) => this.events.set('web:' + name, fn), setWindowOpenHandler() {},
       send: (...args) => nativeCalls.push(['send', ...args]), executeJavaScript: async () => {},
+      reload: () => nativeCalls.push(['reload']),
     }
     windows.push(this)
   }
@@ -107,6 +108,10 @@ let trayMenu
 let trayClick
 class FakeTray { setToolTip() {} setContextMenu(menu) { trayMenu = menu } on(name, fn) { if (name === 'click') trayClick = fn } destroy() {} }
 const display = { workArea: a[0], bounds: { ...a[0] }, scaleFactor: 1.5 }
+// powerMonitor 替身：把注册的处理器记下来，好在测试里**真的触发**它 ——
+// 只做文本断言的话，真实执行路径（清几何→强制可交互→夹窗口）不会被覆盖。
+const powerHandlers = new Map()
+const powerMonitor = { on: (name, fn) => powerHandlers.set(name, fn) }
 let linked = true
 const fakeLink = {
   start: async () => {}, refresh: async () => {}, close() {}, onChange: () => () => {},
@@ -119,6 +124,7 @@ const electron = {
     getDisplayNearestPoint: () => display, getCursorScreenPoint: () => cursor, on() {} },
   shell: { openExternal: async () => {} }, ipcMain: { on: (name, fn) => ipc.set(name, fn), handle: (name, fn) => ipc.set('handle:' + name, fn) },
   nativeImage: { createFromPath: () => ({ isEmpty: () => false, resize: () => ({}) }), createEmpty: () => ({}) },
+  powerMonitor,
   dialog: { showMessageBox: async () => {}, showErrorBox: (...args) => { throw new Error(args.join(': ')) } },
 }
 const fakeRequire = (name) => {
@@ -350,6 +356,69 @@ try {
       const generated = fs.readFileSync(path.join(SHELL, name + '.js'), 'utf8')
       assert.equal(generated.slice(generated.indexOf('\n') + 1), source)
     }
+  })
+  // ————————————————————————————————————————————————————————————
+  // 睡眠/唤醒自愈 + 最后一道恢复入口
+  //
+  // 为什么要有这些：真机事故（2026-10-13）"电脑睡眠后再打开，她看得见但点不动"。
+  // 当时壳**完全没有处理系统睡眠/唤醒**（没有 powerMonitor），页面快照停更后
+  // 穿透就可能卡在"整窗穿透"，而唯一恢复办法是**重启整个壳** ——
+  // 用户不该为了这个去杀进程。
+  // ————————————————————————————————————————————————————————————
+  test('睡眠/唤醒后自愈：清几何 + 强制可交互 + 夹回可见区', () => {
+    const src = fs.readFileSync(path.join(SHELL, 'main.js'), 'utf8')
+    assert.match(src, /powerMonitor\.on\('resume'/, 'resume 事件必须接上')
+    assert.match(src, /powerMonitor\.on\('unlock-screen'/, '解锁屏幕也要接上（睡眠常伴随锁屏）')
+    const body = /function onPowerResume\([\s\S]*?\n}/.exec(src)
+    assert(body, '必须有 onPowerResume')
+    assert.match(body[0], /geometry = null/, '唤醒后必须清掉可能过期的几何')
+    assert.match(body[0], /setIgnoreMouse\(false/, '唤醒后必须强制恢复可交互（否则整窗穿透点不到她）')
+    assert.match(body[0], /clampWindow\(/, '唤醒后要夹回可见工作区（分辨率/显示器可能变了）')
+    assert.match(src, /catch \(err\) \{ bootLog\('powerMonitor 不可用/, 'powerMonitor 不可用时要容错，不能把启动带崩')
+  })
+  test('托盘有「重新载入她」这条不依赖她的恢复入口', () => {
+    const src = fs.readFileSync(path.join(SHELL, 'main.js'), 'utf8')
+    assert.match(src, /label: '重新载入她', click: reloadPet/, '托盘必须有重新载入项')
+    const body = /function reloadPet\([\s\S]*?\n}/.exec(src)
+    assert(body, '必须有 reloadPet')
+    assert.match(body[0], /webContents\.reload\(\)/, '重载页面才能重跑 main()、重建掩码与几何')
+    assert.match(body[0], /lastIgnore = null/, '重载前要清掉穿透缓存，否则状态不会重新下发')
+    assert.match(body[0], /setIgnoreMouse\(false/, '重载期间必须保持可交互')
+  })
+  test('穿透切换日志带判定依据（不然"她点不到"只能靠猜）', () => {
+    const src = fs.readFileSync(path.join(SHELL, 'main.js'), 'utf8')
+    assert.match(src, /function setIgnoreMouse\(ignore, why\)/, 'setIgnoreMouse 要能记下原因')
+    assert.match(src, /\+ \(why \? '  \[' \+ why \+ '\]'/, '原因要写进 boot.log')
+    assert.match(src, /'cursor=' \+ Math\.round\(p\.x - b\.x\)/, '要记光标在她窗口内的坐标')
+    assert.match(src, /' hit=' \+ kind/, '要记命中类型')
+    assert.match(src, /' fresh=' \+ fresh/, '要记几何是否新鲜')
+  })
+  // ——— 真实触发（不是文本断言）：stub 里注册了 powerMonitor，这里直接调用它 ———
+  test('真的触发屏幕解锁：穿透被强制关掉、几何被清掉、位置夹回可见区', () => {
+    assert(powerHandlers.has('resume'), '必须注册了 resume')
+    assert(powerHandlers.has('unlock-screen'), '必须注册了 unlock-screen')
+    // 先造出"穿透已打开 + 几何新鲜"的状态
+    cursor = { x: 5, y: 5 }
+    snapshot([], 'idle')
+    tickPointer()
+    assert.deepEqual(nativeCalls.filter((c) => c[0] === 'ignore').at(-1)[1], true, '前置：空白处应处于穿透')
+    // 把窗口丢到屏幕外，模拟唤醒后分辨率变了
+    win.setPosition(99999, 99999)
+    nativeCalls.length = 0
+    powerHandlers.get('unlock-screen')()
+    const last = nativeCalls.filter((c) => c[0] === 'ignore').at(-1)
+    assert(last, '唤醒处理必须下发一次穿透状态')
+    assert.equal(last[1], false, '唤醒后必须强制可交互——否则整窗穿透，她看得见但点不到')
+    assert(nativeCalls.some((c) => c[0] === 'position'), '唤醒后要把窗口夹回可见工作区')
+    assert(win.bounds.x < 99999, '窗口必须真的被移回来')
+  })
+  test('真的点托盘「重新载入她」：重载页面 + 清穿透缓存', () => {
+    const item = trayMenu.find((entry) => entry.label === '重新载入她')
+    assert(item, '托盘里必须有「重新载入她」')
+    nativeCalls.length = 0
+    item.click()
+    assert(nativeCalls.some((c) => c[0] === 'reload'), '必须真的重载页面（重跑 main() 才能重建掩码与几何）')
+    assert.equal(nativeCalls.filter((c) => c[0] === 'ignore').at(-1)[1], false, '重载期间保持可交互')
   })
   console.log('结果：pass ' + pass + ' / fail 0')
 } finally {

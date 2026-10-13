@@ -1,6 +1,6 @@
 'use strict'
 // Source template. Generated into desktop/standalone/main.js by make-standalone-shell.mjs.
-const { app, BrowserWindow, Tray, Menu, screen, shell, ipcMain, nativeImage, dialog } = require('electron')
+const { app, BrowserWindow, Tray, Menu, screen, shell, ipcMain, nativeImage, dialog, powerMonitor } = require('electron')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -88,13 +88,19 @@ function savePos() {
   if (!validWin()) return
   try { writeJSON(path.join(app.getPath('userData'), 'pos.json'), savedPosition(win.getBounds(), body, areas())) } catch (err) { bootLog('position save: ' + err.message) }
 }
-function setIgnoreMouse(ignore) {
+/**
+ * 切换整窗穿透。
+ *
+ * `why` 是**判定依据**，会一起写进日志 —— 这是被真机事故逼出来的：
+ * 2026-10-13 两次"她点不到"，日志里**只有 ON/OFF、没有为什么**，
+ * 于是分不清是「命中算错（她身上被判成空气）」还是「鼠标压根没到她身上」，
+ * 只能靠猜，白绕两轮。现在切换时把「光标在她窗口内的坐标 + 命中类型 +
+ * 几何是否新鲜」一并记下，一眼就能定性。
+ */
+function setIgnoreMouse(ignore, why) {
   if (!validWin() || lastIgnore === ignore || ((drag || (composing && focusInput)) && ignore)) return
-  // 三道保险之一：**把每次切换记下来**。
-  // 真机事故（2026-10-13）：窗口卡在 WS_EX_TRANSPARENT=YES，于是整窗点击穿透，
-  // 她身上也拖不动，而日志里**一个字都没有** —— 完全看不出是穿透卡住了。
-  // 穿透是整窗样式，一旦卡住整个角色都失效，所以这个状态变化必须可见。
-  bootLog('passthrough ' + (ignore ? 'ON (click-through)' : 'OFF (interactive)'))
+  bootLog('passthrough ' + (ignore ? 'ON (click-through)' : 'OFF (interactive)')
+    + (why ? '  [' + why + ']' : ''))
   win.setIgnoreMouseEvents(ignore, { forward: true })
   lastIgnore = ignore
 }
@@ -165,7 +171,13 @@ function tickPointer() {
   const kind = hitKind(p.x - b.x, p.y - b.y)
   if (kind !== 'none') cancelRoam()
   // Clear an already-enabled passthrough as well when geometry expires.
-  if (!drag) setIgnoreMouse(geometryFresh() ? kind === 'none' : false)
+  if (!drag) {
+    // 判定依据一起记下（见 setIgnoreMouse 注释）：这样"她点不到"时能直接分清
+    // 是命中算错还是鼠标没到，不用再靠猜。
+    const fresh = geometryFresh()
+    setIgnoreMouse(fresh ? kind === 'none' : false,
+      'cursor=' + Math.round(p.x - b.x) + ',' + Math.round(p.y - b.y) + ' hit=' + kind + ' fresh=' + fresh)
+  }
   if (!pointer || pointer.x !== p.x || pointer.y !== p.y) {
     pointer = p
     const display = screen.getDisplayNearestPoint(p).bounds
@@ -268,6 +280,42 @@ function hidePet() {
   syncTrayMenu()
   bootLog('visibility hidden')
 }
+/**
+ * 重新载入她 —— 最后一道恢复手段。
+ *
+ * 为什么需要：真机事故（2026-10-13）里出现过"她看得见但点不动"，
+ * 而唯一的恢复办法是**重启整个壳**。用户不该为了这个去杀进程。
+ * 重载页面会重跑 `main()`：重建掩码、重新上报几何，等于把她重置一遍。
+ * 也放在托盘里，因为那时候她可能已经点不到了（正好需要一条不依赖她的入口）。
+ */
+function reloadPet() {
+  if (!validWin()) return
+  endDrag()
+  rendererReady = false
+  geometry = null
+  geometryUntil = 0
+  lastIgnore = null
+  setIgnoreMouse(false, 'reload')
+  bootLog('reload pet')
+  win.webContents.reload()
+  syncTrayMenu()
+}
+/** 系统睡眠/唤醒后的自愈：清掉可能已经过期的几何，并强制恢复可交互。 */
+function onPowerResume(kind) {
+  if (!validWin()) return
+  endDrag()
+  rendererReady = false
+  geometry = null
+  geometryUntil = 0
+  lastIgnore = null
+  setIgnoreMouse(false, 'power-' + kind)
+  cancelRoam()
+  bootLog('power ' + kind + ': geometry cleared, forcing interactive')
+  // 位置也可能因为分辨率/显示器变化而落到屏幕外，夹回可见工作区。
+  const cur = win.getBounds()
+  const p = clampWindow({ x: cur.x, y: cur.y }, movementBody(), areas())
+  if (p.x !== cur.x || p.y !== cur.y) win.setPosition(p.x, p.y)
+}
 function syncTrayMenu() {
   if (!tray) return
   const connected = link && link.status().connected
@@ -287,6 +335,8 @@ function syncTrayMenu() {
       lowPower = !lowPower; updateSettings({ lowPower }); cancelRoam()
       win.webContents.executeJavaScript('window.DSHPet && DSHPet.setLowPower(' + lowPower + ')').catch(() => {}); syncTrayMenu()
     } },
+    { type: 'separator' },
+    { label: '重新载入她', click: reloadPet },
     { type: 'separator' },
     { label: connected ? '已连接 DSH' : '等待 DSH · 自动重连', enabled: false },
     { label: '连接到', submenu: ['auto', 'desktop', 'web'].map((value, i) => ({
@@ -410,6 +460,14 @@ async function start() {
     if (!validWin()) return
     endDrag(); cancelRoam(); const p = clampWindow(win.getBounds(), movementBody(), areas()); win.setPosition(p.x, p.y); savePos()
   })
+  // 系统睡眠/唤醒：显示几何、DPI、合成器都可能变，页面快照也可能停更。
+  // 不处理的话穿透可能卡在"整窗穿透"，表现就是**她看得见但点不动**，
+  // 而唯一的恢复办法是重启壳（真机事故 2026-10-13）。这里清掉过期几何并强制可交互。
+  // 用 powerMonitor 而不是"猜"：resume / unlock-screen 都是明确的系统事件。
+  try {
+    powerMonitor.on('resume', () => onPowerResume('resume'))
+    powerMonitor.on('unlock-screen', () => onPowerResume('unlock'))
+  } catch (err) { bootLog('powerMonitor 不可用: ' + (err && err.message)) }
   await win.loadURL(server.petBase + '/dsh-pet/app')
   bootLog('started: ' + server.petBase + ' DSH=' + (link.status().base || 'offline'))
 }
