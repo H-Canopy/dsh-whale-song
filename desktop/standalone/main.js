@@ -121,6 +121,24 @@ function geometryFresh() { return !!geometry && Date.now() < geometryUntil }
  * 而且要配合 `inside(model)` 那道外框检查，所以不会延伸到整个窗口。
  */
 const HIT_TOLERANCE_CSS = 14
+/**
+ * 迟滞宽度（CSS 像素）：状态确定后，边界要再"多让开"这么多才允许翻转。
+ *
+ * 为什么必须要它 —— 真机实测（2026-10-13）拿到铁证：
+ *   掩码每 MASK_REFRESH_MS=1200ms 重采一次，而**校验和每次都不一样**：
+ *     mask 128x111 sum=5905586 → 5903204 → 5906530 → 5807933 → …
+ *   因为她一直在呼吸/眨眼/物理摆动，剪影的**边缘像素**在"她/空气"之间来回翻。
+ *   于是**同一个光标坐标、同一个 fresh=true**，判定却在 hit=model / hit=none 之间翻：
+ *     passthrough ON  [cursor=236,392 hit=none  fresh=true]
+ *     passthrough OFF [cursor=236,392 hit=model fresh=true]
+ *   后果：鼠标停在她轮廓附近时，按下那一刻可能正好是空气 ⇒ 穿透 ⇒
+ *   **点不到、也拖不动**。用户报的"刚刚还是好的，又不行了"就是这个。
+ *
+ * 迟滞怎么解决：**已经在交互态时，必须离开她更远才恢复穿透**。
+ * 这样边缘像素翻几次都不会改变窗口状态 —— 状态只在真正越过边界时才翻。
+ * 代价：一旦抓住她，要离她大约 (HIT_TOLERANCE_CSS + 这个值) 才放手，体感上更"抓得住"。
+ */
+const HIT_HYSTERESIS_CSS = 6
 function hitKind(x, y) {
   if (!geometry) return 'none'
   const inside = (r) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h
@@ -135,6 +153,25 @@ function hitKind(x, y) {
   // 掩码格子 → CSS 像素的换算：把容差从 CSS 换回格子数
   const rx = Math.max(1, Math.ceil(HIT_TOLERANCE_CSS * m.w / model.w))
   const ry = Math.max(1, Math.ceil(HIT_TOLERANCE_CSS * m.h / model.h))
+  for (let yy = Math.max(0, gy - ry); yy <= Math.min(m.h - 1, gy + ry); yy++) {
+    for (let xx = Math.max(0, gx - rx); xx <= Math.min(m.w - 1, gx + rx); xx++) {
+      if (m.grid[yy * m.w + xx]) return 'model'
+    }
+  }
+  return 'none'
+}
+/** 迟滞版命中判定：只在"穿透态"时用更紧的容差，在"交互态"时用更松的容差。 */
+function hitKindSticky(x, y, keepInteractive) {
+  const kind = hitKind(x, y)
+  if (kind !== 'none' || !keepInteractive || !geometry || petHidden) return kind
+  const m = geometry.mask
+  const model = geometry.model || body
+  if (!m) return kind
+  const pad = HIT_TOLERANCE_CSS + HIT_HYSTERESIS_CSS
+  const gx = Math.floor((x - model.x) * m.w / model.w)
+  const gy = Math.floor((y - model.y) * m.h / model.h)
+  const rx = Math.max(1, Math.ceil(pad * m.w / model.w))
+  const ry = Math.max(1, Math.ceil(pad * m.h / model.h))
   for (let yy = Math.max(0, gy - ry); yy <= Math.min(m.h - 1, gy + ry); yy++) {
     for (let xx = Math.max(0, gx - rx); xx <= Math.min(m.w - 1, gx + rx); xx++) {
       if (m.grid[yy * m.w + xx]) return 'model'
@@ -165,6 +202,15 @@ function inputSnapshot(snapshot) {
   const m = snapshot.mask
   const mask = m && Number.isInteger(m.w) && Number.isInteger(m.h) && m.w > 0 && m.h > 0 && m.w * m.h <= 65536
     && Array.isArray(m.grid) && m.grid.length === m.w * m.h ? m : geometry && geometry.mask
+  // 掩码一到就记一行：尺寸 + 校验和 + 版本号。
+  // 为什么要记校验和：真机上出现"同一光标坐标、同一 fresh=true，却在 hit=model / hit=none
+  // 之间来回翻"。有了这三项就能一眼分清是「掩码内容在变」还是「掩码没变、是别的在抖」。
+  // 只在新掩码到达时打（页面每次重采才发一次，周期 1200ms），所以不会刷屏。
+  if (m && mask === m) {
+    let sum = 0
+    for (let i = 0; i < m.grid.length; i += 7) sum = (sum + m.grid[i] * (i + 1)) % 1000000007
+    bootLog('mask ' + m.w + 'x' + m.h + ' sum=' + sum + ' at=' + (snapshot.maskAt === undefined ? 'undef' : snapshot.maskAt))
+  }
   const panels = snapshot.panels.filter(rect).slice(0, 32)
   // 面板集合**变化时**才记一行（低频）。
   // 为什么需要：真机上出现过"点在看着空白的左上角，却被判成 hit=panel"，
@@ -176,7 +222,8 @@ function inputSnapshot(snapshot) {
     lastPanelKey = panelKey
     bootLog('panels ' + panels.length + (panels.length ? '  [' + panelKey + ']' : '  (none)'))
   }
-  geometry = { panels, mask, model: rect(snapshot.model) ? snapshot.model : newBody, status: String(snapshot.status || 'idle'),
+  geometry = { panels, mask, maskAt: mask ? (snapshot.maskAt || 0) : (geometry ? geometry.maskAt : 0),
+    model: rect(snapshot.model) ? snapshot.model : newBody, status: String(snapshot.status || 'idle'),
     roamBlocked: typeof snapshot.roamBlocked === 'boolean' ? snapshot.roamBlocked : snapshot.panels.length > 0 }
   if (typeof snapshot.lowPower === 'boolean') lowPower = snapshot.lowPower
   rendererReady = true
@@ -194,15 +241,24 @@ function tickPointer() {
   if (!validWin() || !win.isVisible()) return
   const p = screen.getCursorScreenPoint()
   const b = win.getBounds()
-  const kind = hitKind(p.x - b.x, p.y - b.y)
+  // 用**迟滞版**判定：已经在交互态时，要离开她更远才恢复穿透。
+  // 这样掩码每 1.2 秒重采带来的边缘像素翻转**不会**传到窗口状态
+  // （见 HIT_HYSTERESIS_CSS 的注释：这是"点不到、拖不动"的真因）。
+  const kind = hitKindSticky(p.x - b.x, p.y - b.y, lastIgnore === false)
   if (kind !== 'none') cancelRoam()
   // Clear an already-enabled passthrough as well when geometry expires.
   if (!drag) {
     // 判定依据一起记下（见 setIgnoreMouse 注释）：这样"她点不到"时能直接分清
     // 是命中算错还是鼠标没到，不用再靠猜。
+    //
+    // `mask=` 是**掩码版本号**（页面每次重采掩码都会变，周期 MASK_REFRESH_MS=1200ms）。
+    // 为什么要记它：真机上出现过"**同一个光标坐标**、同一个 fresh=true，
+    // 却在 hit=model / hit=none 之间来回翻" —— 有版本号就能一眼看出
+    // 到底是"掩码重采导致判定翻转"还是别的原因在抖。
     const fresh = geometryFresh()
     setIgnoreMouse(fresh ? kind === 'none' : false,
-      'cursor=' + Math.round(p.x - b.x) + ',' + Math.round(p.y - b.y) + ' hit=' + kind + ' fresh=' + fresh)
+      'cursor=' + Math.round(p.x - b.x) + ',' + Math.round(p.y - b.y) + ' hit=' + kind
+      + ' fresh=' + fresh + ' mask=' + (geometry ? geometry.maskAt : '-'))
   }
   if (!pointer || pointer.x !== p.x || pointer.y !== p.y) {
     pointer = p
