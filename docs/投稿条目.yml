@@ -9,7 +9,10 @@
 
 > **本仓库是什么**：上游 [`Andersen216/dsh-whale-girl-live2d`](https://github.com/Andersen216/dsh-whale-girl-live2d)（MIT）
 > 的**增强版 fork** —— 除了桌宠本体，还接了本地音乐 / 在线电台 / 网易云联动，并做了独立桌面壳。
-> 包名**故意**与上游不同（`dsh-whale-song` ≠ `dsh-whale-girl-live2d`），所以**两个可以同时装、互不替换**。
+> 包名**故意**与上游不同（`dsh-whale-song` ≠ `dsh-whale-girl-live2d`）：
+> 包名 / 安装源 / profile 键名都不同，**装一个、卸一个不会影响另一个**。
+> ⚠️ 但两者插件 id（`dsh-live2d-pet`）与 `/dsh-pet/*` 路由前缀相同，
+> **不建议同时启用**（同时开可能只有一个能正常工作；此条为推断，未经实测）。
 
 > ⚠️ **署名不要删**：角色形象原作「溟月」© 上善无形、女仆鲸鱼娘二次设计 © ZipZipPipe、
 > Live2D 模型（绑定/动作/表情）© 氵六青 —— 三位都是 **CC BY-NC-SA 4.0**，

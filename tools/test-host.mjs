@@ -611,6 +611,26 @@ check(
 check('竖直位置只做「别被屏幕切掉」的软夹，不做吸附', /function clampY\(/.test(petCode) && petCode.includes('maxTop'))
 check('没注册 Expressions（避免和 rig 抢参数）', !JSON.parse(fs.readFileSync(path.join(ROOT, 'assets/model/c_0120.model3.json'), 'utf8')).FileReferences.Expressions)
 
+// ————————————————————————————————————————————————————————————
+// 版本一致性：包版本与运行时上报的版本必须一样
+//
+// 为什么要有这条：`lib/index.js` 里那个 VERSION 是**运行时上报**的版本
+// （/dsh-pet/state 的 version、前端注释头、设置页"插件版本"）。
+// 它和 package.json 是**两个独立的地方**，没有任何机制保证同步 ——
+// 2026-10-13 就从这里漂出去过：包升到 0.5.0，而 VERSION 还是 0.4.7-song.1，
+// 于是"装的什么版本"两边说法不一致，排查问题时会先被这个误导。
+// ————————————————————————————————————————————————————————————
+{
+  const pkgVersion = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version
+  const hostSource = fs.readFileSync(path.join(ROOT, 'lib', 'index.js'), 'utf8')
+  const m = /^const VERSION = '([^']+)'/m.exec(hostSource)
+  check(
+    'package.json 的 version 与 lib/index.js 的 VERSION 一致',
+    !!m && m[1] === pkgVersion,
+    m ? `package=${pkgVersion} host=${m[1]}` : 'lib/index.js 里找不到 const VERSION = \'…\'',
+  )
+}
+
 server.close()
 console.log(`\n结果: ${pass} 通过 / ${fail} 失败\n`)
 process.exit(fail > 0 ? 1 : 0)
