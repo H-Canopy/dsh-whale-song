@@ -182,6 +182,15 @@ try {
     ipc.get('pet-hover')(sender, { x: 320, y: 490 })
     assert.equal(nativeCalls.filter((call) => call[0] === 'ignore').at(-1)[1], true)
   })
+  test('animated model hitbox can change without moving the saved layout anchor', () => {
+    const before = win.getBounds()
+    const model = { ...body, x: body.x - 10, w: body.w + 20, y: body.y + 30, h: body.h - 30 }
+    ipc.get('pet-input')(sender, { body, model, mask, panels: [], status: 'idle' })
+    assert.deepEqual(win.getBounds(), before)
+    cursor = { x: before.x + body.x - 5, y: before.y + body.y + 100 }; tickPointer()
+    assert.equal(nativeCalls.filter((call) => call[0] === 'ignore').at(-1)[1], false, 'expanded visible animation must receive input')
+    snapshot()
+  })
   test('foreign IPC sender and transparent background cannot start a drag', () => {
     ipc.get('drag-start')({ sender: {} }, { x: 320, y: 490 })
     ipc.get('drag-start')(sender, { x: 20, y: 20 })
@@ -311,6 +320,25 @@ try {
     const item = trayMenu.find((item) => /自主漫游/.test(item.label))
     item.click({ checked: false })
     assert.equal(JSON.parse(fs.readFileSync(path.join(userData, 'settings.json'))).roaming, false)
+  })
+  test('viewport grows and shrinks for model size while preserving its screen anchor', () => {
+    trayClick(); snapshot()
+    win.setPosition(400, 100)
+    const before = win.getBounds()
+    const resizedBody = { x: 10, y: 50, w: 600, h: 450 }
+    ipc.get('pet-size')(sender, { width: 644, height: 760 })
+    assert.equal(win.bounds.width, 644); assert.equal(win.bounds.height, 760)
+    ipc.get('pet-input')(sender, { body: resizedBody, mask, panels: [], status: 'idle' })
+    assert.equal(win.bounds.x + resizedBody.x, before.x + body.x)
+    assert.equal(win.bounds.y + resizedBody.y, before.y + body.y)
+    const count = nativeCalls.filter((call) => call[0] === 'bounds').length
+    ipc.get('pet-size')(sender, { width: 644, height: 760 })
+    ipc.get('pet-size')({ sender: {} }, { width: 800, height: 900 })
+    ipc.get('pet-size')(sender, { width: Infinity, height: 900 })
+    assert.equal(nativeCalls.filter((call) => call[0] === 'bounds').length, count)
+    ipc.get('pet-size')(sender, { width: 200, height: 200 })
+    assert.equal(win.bounds.width, 420); assert.equal(win.bounds.height, 600)
+    snapshot()
   })
   test('ownership preserves unrelated DSH config and is released on exit', () => {
     const cfg = JSON.parse(fs.readFileSync(path.join(home, 'dsh-live2d-pet.json')))

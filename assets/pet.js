@@ -776,7 +776,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
   transition:opacity .18s ease,transform .18s cubic-bezier(.2,.9,.3,1);
   font-size:calc(12px * var(--dshp-ps))}
 .dshp-hud.dshp-on{opacity:1;visibility:visible;
-  transform:translateX(calc(-50% + var(--dshp-shift,0px))) translateY(0)}
+  transform:translateX(calc(-50% + var(--dshp-shift,0px))) translateY(var(--dshp-shift-y,0px))}
 /* 刚弹出来那一下给一圈呼吸光，提醒「看这里」——冒烟效果用 box-shadow，不动 transform */
 .dshp-hud.dshp-flash{animation:dshp-hud-flash 1.15s ease-out 2}
 @keyframes dshp-hud-flash{
@@ -1626,10 +1626,11 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       const want = PERF.low ? 1 : Math.min(window.devicePixelRatio || 1, 1.5)
       try {
         if (app.renderer.resolution !== want) {
-          const w = app.renderer.width
-          const h = app.renderer.height
+          const w = app.renderer.screen.width
+          const h = app.renderer.screen.height
           app.renderer.resolution = want
           app.renderer.resize(w, h)
+          mask.dirty = true
         }
       } catch (err) {}
     }
@@ -1767,6 +1768,21 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     if (!panel) return
     const vw = window.innerWidth
     const pad = 10
+    if (panel.matches('.dshp-panel,.dshp-hud')) {
+      if (!panel.classList.contains('dshp-on')) return
+      const r = ui.root.getBoundingClientRect()
+      const cs = getComputedStyle(panel)
+      const w = panel.offsetWidth
+      const h = panel.offsetHeight
+      // Derive from layout, not the previous animated transform (which causes feedback).
+      const left = clamp(headScreenX() - w / 2, pad, Math.max(pad, vw - w - pad))
+      const top = r.bottom - (parseFloat(cs.bottom) || 0) - h
+      const shift = Math.round(left - (r.left + r.width / 2 - w / 2)) + 'px'
+      const shiftY = Math.round(Math.max(0, pad - top)) + 'px'
+      if (panel.style.getPropertyValue('--dshp-shift') !== shift) panel.style.setProperty('--dshp-shift', shift)
+      if (panel.style.getPropertyValue('--dshp-shift-y') !== shiftY) panel.style.setProperty('--dshp-shift-y', shiftY)
+      return
+    }
     panel.style.setProperty('--dshp-shift', '0px')
     if (!panel.classList.contains('dshp-on')) return
     const w = panel.getBoundingClientRect().width || 0
@@ -1825,8 +1841,10 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     // 缩放按**实体高度**算（不是视窗高度）：加了余量之后她的大小和以前一模一样，
     // 只是周围多出一圈空间。
     let scale = wanted / (ch * frac * baseH)
-    const maxW = Math.max(240, window.innerWidth * (CFG.maxWidthRatio || 0.5))
+    const desktop = !!window.dshPetNative
+    const maxW = desktop ? Math.max(240, window.screen.availWidth - 32) : Math.max(240, window.innerWidth * (CFG.maxWidthRatio || 0.5))
     if (viewWModel * scale > maxW) scale = maxW / viewWModel
+    if (desktop) scale = Math.min(scale, Math.max(180, window.screen.availHeight - 96) / viewHModel)
 
     const w = Math.max(40, Math.round(viewWModel * scale))
     const h = Math.max(40, Math.round(viewHModel * scale))
@@ -1855,6 +1873,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       // 面板自己一套缩放：夹在 0.85~1.15，缩太小就没法操作了
       ui.root.style.setProperty('--dshp-ps', clamp(h / UI_BASE_HEIGHT, 0.85, 1.15).toFixed(3))
     }
+    if (window.dshPetNative?.resize) window.dshPetNative.resize({ width: w + 24, height: h + Math.max(60, dockClearance() + 20) })
     mask.dirty = true
     lastView = {
       w,
@@ -2937,10 +2956,11 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     document.addEventListener(
       'dblclick',
       (e) => {
-        // 主人要求：输入框只从工具栏的「说话」按钮开，双击鱼身不再弹它。
-        // 双击仍然算一次戳她（第一下 click 已经触发过了），这里只吃掉默认行为。
+        // Desktop pointer releases are handled by the native bridge, including double taps.
+        if (window.dshPetNative) return
         if (!hitTest(e.clientX, e.clientY)) return
         e.preventDefault()
+        openMenu('talk')
       },
       true,
     )
@@ -4941,8 +4961,10 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       const stage = app && app.view && app.view.parentElement
       if (!stage || !mask.grid || !mask.w || !mask.h) return null
       const r = stage.getBoundingClientRect()
+      const anchor = ui.root.getBoundingClientRect()
       return {
-        body: { x: r.left, y: r.top, w: r.width, h: r.height },
+        body: { x: anchor.left, y: anchor.top, w: anchor.width, h: anchor.height },
+        model: { x: r.left, y: r.top, w: r.width, h: r.height },
         maskAt: mask.lastBuild,
         mask: previousBuild === mask.lastBuild ? null : { w: mask.w, h: mask.h, grid: Array.from(mask.grid) },
       }
@@ -5051,6 +5073,11 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     },
     /** 隐藏 / 恢复。桌面壳通过托盘找回角色时也恢复页面状态。 */
     setHidden,
+    desktopClick: (x, y, double = false) => {
+      if (!window.dshPetNative || !ui || ui.root.classList.contains('dshp-hidden')) return
+      if (double) openMenu('talk')
+      else poke(x, y)
+    },
     resumeDesktop: () => {
       if (!window.__DSHPET_SHELL__) return
       mask.dirty = true

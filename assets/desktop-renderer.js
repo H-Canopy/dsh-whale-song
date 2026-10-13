@@ -8,6 +8,7 @@
   let latestBody = null
   let nativeVisible = true
   let suppressTabClick = false
+  let lastTap = null
   const panelSelector = '.dshp-panel,.dshp-menu,.dshp-hud,.dshp-bubble,.dshp-composer,.dshp-dock,.dshp-tab,.dshp-mail'
   const rect = (el) => {
     const r = el.getBoundingClientRect()
@@ -19,10 +20,10 @@
     if (!pet || !stage || !pet.inputSnapshot) return
     const input = pet.inputSnapshot(lastMaskAt)
     if (input?.mask) lastMaskAt = input.maskAt
-    if (input) latestBody = input.body
+    if (input) latestBody = input.model || input.body
     const tab = document.querySelector('.dshp-tab')
     if (tab) {
-      const anchor = latestBody || rect(stage)
+      const anchor = input?.body || latestBody || rect(stage)
       const position = {
         left: Math.max(8, Math.min(innerWidth - tab.offsetWidth - 8, anchor.x + anchor.w / 2 - tab.offsetWidth / 2)) + 'px',
         top: Math.max(8, Math.min(innerHeight - 40, anchor.y + anchor.h - 32)) + 'px', right: 'auto', bottom: 'auto',
@@ -40,7 +41,7 @@
         && cs.pointerEvents !== 'none' && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0
     }).map(rect)
     const roamBlocked = !!document.querySelector('.dshp-menu.dshp-on,.dshp-composer.dshp-on,.dshp-hud.dshp-on,.dshp-panel.dshp-on')
-    native.input({ body: input.body, mask: input.mask, panels, status: pet.state.agent.status, lowPower: pet.isLowPower(), roamBlocked })
+    native.input({ body: input.body, model: input.model, mask: input.mask, panels, status: pet.state.agent.status, lowPower: pet.isLowPower(), roamBlocked })
   }
   function kind(x, y, target) {
     if (!nativeVisible || document.body.classList.contains('dshp-pet-hidden')) return target?.closest('.dshp-tab') ? 'tab' : 'none'
@@ -54,7 +55,7 @@
   window.addEventListener('pointerdown', (e) => {
     if (native.traceInput) native.traceInput({ type: 'pointerdown', x: e.clientX, y: e.clientY })
     if (e.button !== 0 || !['model', 'tab'].includes(kind(e.clientX, e.clientY, e.target))) return
-    down = { x: e.screenX, y: e.screenY, dx: 0, dy: 0, moved: false, target: e.target, id: e.pointerId }
+    down = { x: e.screenX, y: e.screenY, dx: 0, dy: 0, moved: false, kind: kind(e.clientX, e.clientY, e.target), target: e.target, id: e.pointerId }
     try { e.target.setPointerCapture(e.pointerId) } catch {}
     native.dragStart({ x: e.clientX, y: e.clientY })
   }, true)
@@ -73,15 +74,25 @@
     if (!down) return
     const was = down
     down = null
-    if (e.type === 'pointerup' && was.moved) {
+    if (e.type === 'pointerup') {
       was.dx = e.screenX - was.x
       was.dy = e.screenY - was.y
+      if (Math.hypot(was.dx, was.dy) >= 4) was.moved = true
     }
     native.dragEnd({ dx: was.moved ? was.dx : 0, dy: was.moved ? was.dy : 0 })
     try { was.target.releasePointerCapture(was.id) } catch {}
     if (was.moved) {
+      lastTap = null
       suppressTabClick = !!was.target.closest?.('.dshp-tab')
       e.preventDefault(); e.stopImmediatePropagation()
+    } else if (e.type === 'pointerup' && was.kind === 'model') {
+      const now = performance.now()
+      const double = lastTap && now - lastTap.at <= 500 && Math.hypot(e.screenX - lastTap.x, e.screenY - lastTap.y) <= 8
+      lastTap = double ? null : { at: now, x: e.screenX, y: e.screenY }
+      if (native.traceInput) native.traceInput({ type: double ? 'double-tap' : 'poke', x: e.clientX, y: e.clientY })
+      window.DSHPet?.desktopClick(e.clientX, e.clientY, !!double)
+    } else {
+      lastTap = null
     }
   }
   window.addEventListener('pointerup', release, true)
@@ -109,6 +120,7 @@
   if (native.onVisibility) native.onVisibility((visible) => {
     nativeVisible = visible === true
     down = null
+    lastTap = null
     if (window.DSHPet) {
       DSHPet.setHidden(!nativeVisible, false)
       if (nativeVisible && DSHPet.resumeDesktop) DSHPet.resumeDesktop()

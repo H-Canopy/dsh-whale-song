@@ -35,6 +35,7 @@ let roam = null
 let nextRoamAt = Date.now() + 25000
 let pointer = null
 let geometryUntil = 0
+let resizeAnchor = null
 let shuttingDown = false
 let ownerEndpoint = ''
 let priorOwnerEndpoint
@@ -59,6 +60,8 @@ const settings = () => {
 function updateSettings(patch) { cachedSettings = { ...settings(), ...patch }; writeJSON(settingsFile(), cachedSettings) }
 const areas = () => screen.getAllDisplays().map((d) => d.workArea)
 const validWin = () => win && !win.isDestroyed()
+// Keep the toolbar below the model inside the monitor work area too.
+const movementBody = () => ({ ...body, h: body.h + 48 })
 function bootLog(message) {
   try {
     const file = path.join(app.getPath('userData'), 'boot.log')
@@ -104,13 +107,14 @@ function hitKind(x, y) {
   if (geometry.panels.some(inside)) return 'panel'
   if (petHidden) return 'none'
   const m = geometry.mask
-  if (!inside(body)) return 'none'
+  const model = geometry.model || body
+  if (!inside(model)) return 'none'
   if (!m) return 'model'
-  const gx = Math.floor((x - body.x) * m.w / body.w)
-  const gy = Math.floor((y - body.y) * m.h / body.h)
+  const gx = Math.floor((x - model.x) * m.w / model.w)
+  const gy = Math.floor((y - model.y) * m.h / model.h)
   // A few CSS pixels of tolerance around visible pixels; never enlarge the whole silhouette.
-  const rx = Math.max(1, Math.ceil(5 * m.w / body.w))
-  const ry = Math.max(1, Math.ceil(5 * m.h / body.h))
+  const rx = Math.max(1, Math.ceil(5 * m.w / model.w))
+  const ry = Math.max(1, Math.ceil(5 * m.h / model.h))
   for (let yy = Math.max(0, gy - ry); yy <= Math.min(m.h - 1, gy + ry); yy++) {
     for (let xx = Math.max(0, gx - rx); xx <= Math.min(m.w - 1, gx + rx); xx++) {
       if (m.grid[yy * m.w + xx]) return 'model'
@@ -140,15 +144,16 @@ function inputSnapshot(snapshot) {
   const m = snapshot.mask
   const mask = m && Number.isInteger(m.w) && Number.isInteger(m.h) && m.w > 0 && m.h > 0 && m.w * m.h <= 65536
     && Array.isArray(m.grid) && m.grid.length === m.w * m.h ? m : geometry && geometry.mask
-  geometry = { panels: snapshot.panels.filter(rect).slice(0, 32), mask, status: String(snapshot.status || 'idle'),
+  geometry = { panels: snapshot.panels.filter(rect).slice(0, 32), mask, model: rect(snapshot.model) ? snapshot.model : newBody, status: String(snapshot.status || 'idle'),
     roamBlocked: typeof snapshot.roamBlocked === 'boolean' ? snapshot.roamBlocked : snapshot.panels.length > 0 }
   if (typeof snapshot.lowPower === 'boolean') lowPower = snapshot.lowPower
   rendererReady = true
   geometryUntil = Date.now() + 1500
-  if (changed && !drag && validWin()) {
-    const saved = readJSON(path.join(app.getPath('userData'), 'pos.json'), null)
+  if ((changed || resizeAnchor) && !drag && validWin()) {
+    const saved = resizeAnchor || readJSON(path.join(app.getPath('userData'), 'pos.json'), null)
+    resizeAnchor = null
     const current = win.getBounds()
-    const p = restorePosition(saved, body, areas(), current)
+    const p = restorePosition(saved, movementBody(), areas(), current)
     win.setPosition(p.x, p.y)
   }
   if (geometry.roamBlocked || geometry.status !== 'idle') cancelRoam()
@@ -174,7 +179,7 @@ function applyMove() {
   if (!drag || !pendingMove || !validWin()) return
   const delta = pendingMove
   pendingMove = null
-  const next = advanceDrag(drag, delta.dx, delta.dy, body, areas())
+  const next = advanceDrag(drag, delta.dx, delta.dy, movementBody(), areas())
   if (next) win.setBounds(next)
 }
 function endDrag(delta) {
@@ -198,14 +203,14 @@ function tickRoam() {
     const target = clampWindow({
       x: display.x + 12 + Math.random() * Math.max(0, display.width - body.w - 24) - body.x,
       y: display.y + 12 + Math.random() * Math.max(0, display.height - body.h - 24) - body.y,
-    }, body, [display])
+    }, movementBody(), [display])
     const distance = Math.hypot(target.x - bounds.x, target.y - bounds.y)
     roam = { from: bounds, target, start: now, duration: Math.max(2000, distance / 55 * 1000) }
   }
   const t = Math.min(1, (now - roam.start) / roam.duration)
   const smooth = t * t * (3 - 2 * t)
   const next = clampWindow({ x: roam.from.x + (roam.target.x - roam.from.x) * smooth,
-    y: roam.from.y + (roam.target.y - roam.from.y) * smooth }, body, areas())
+    y: roam.from.y + (roam.target.y - roam.from.y) * smooth }, movementBody(), areas())
   const b = win.getBounds()
   if (next.x !== b.x || next.y !== b.y) win.setBounds({ ...next, width: roam.from.width, height: roam.from.height })
   if (t === 1) { savePos(); cancelRoam(20000 + Math.random() * 25000) }
@@ -275,7 +280,7 @@ function syncTrayMenu() {
     } },
     { label: '回到屏幕右下角', click: () => {
       cancelRoam(); const a = screen.getPrimaryDisplay().workArea
-      const p = clampWindow({ x: a.x + a.width - body.x - body.w - 16, y: a.y + a.height - body.y - body.h - 16 }, body, areas())
+      const p = clampWindow({ x: a.x + a.width - body.x - body.w - 16, y: a.y + a.height - body.y - body.h - 16 }, movementBody(), areas())
       win.setPosition(p.x, p.y); savePos(); showPet()
     } },
     { label: '低性能模式', type: 'checkbox', checked: lowPower, click: () => {
@@ -311,6 +316,22 @@ function registerIPC() {
       + ' hit=' + hitKind(point.x, point.y) + ' ignore=' + lastIgnore)
   })
   ipcMain.on('pet-input', (event, data) => { if (trusted(event)) inputSnapshot(data) })
+  ipcMain.on('pet-size', (event, size) => {
+    if (!trusted(event) || petHidden || !size || !Number.isFinite(size.width) || !Number.isFinite(size.height)) return
+    if (size.width <= 0 || size.height <= 0 || size.width > 2000 || size.height > 2000) return
+    const current = win.getBounds()
+    const area = screen.getDisplayNearestPoint({ x: Math.round(current.x + body.x + body.w / 2), y: Math.round(current.y + body.y + body.h / 2) }).workArea
+    const even = (n) => Math.ceil(n / 2) * 2
+    const width = even(Math.min(area.width, Math.max(WIN_W, size.width)))
+    const height = even(Math.min(area.height, Math.max(WIN_H, size.height)))
+    if (Math.abs(current.width - width) < 3 && Math.abs(current.height - height) < 3) return
+    endDrag(); cancelRoam()
+    if (!resizeAnchor) resizeAnchor = savedPosition(current, body, areas())
+    geometryUntil = 0
+    lastIgnore = null; setIgnoreMouse(false)
+    win.setBounds({ ...current, width, height })
+    bootLog('viewport ' + width + 'x' + height)
+  })
   ipcMain.on('pet-hover', (event, point) => {
     if (!trusted(event) || drag || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return
     // Forwarded renderer mouse coordinates can arrive late after moving/showing a window.
@@ -349,7 +370,7 @@ function registerIPC() {
     else if (value === 'open' || value === 'openDSH' || value === 'openDsh' || value === 'open-dsh') await openDsh()
     else if (value === 'quit') app.quit()
     else if (value === 'resetPos') {
-      const a = screen.getPrimaryDisplay().workArea; const p = clampWindow({ x: a.x + a.width - body.x - body.w - 16, y: a.y + a.height - body.y - body.h - 16 }, body, areas())
+      const a = screen.getPrimaryDisplay().workArea; const p = clampWindow({ x: a.x + a.width - body.x - body.w - 16, y: a.y + a.height - body.y - body.h - 16 }, movementBody(), areas())
       win.setPosition(p.x, p.y); savePos()
     } else if (value === 'lowPower') {
       lowPower = !lowPower; updateSettings({ lowPower })
@@ -374,7 +395,7 @@ async function start() {
   win.setMenuBarVisibility(false)
   setIgnoreMouse(true)
   const a = screen.getPrimaryDisplay().workArea
-  const initial = restorePosition(readJSON(path.join(app.getPath('userData'), 'pos.json'), null), body, areas(),
+  const initial = restorePosition(readJSON(path.join(app.getPath('userData'), 'pos.json'), null), movementBody(), areas(),
     { x: a.x + a.width - body.x - body.w - 16, y: a.y + a.height - body.y - body.h - 16 })
   win.setPosition(initial.x, initial.y)
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -399,11 +420,11 @@ async function start() {
   timers.push(setInterval(tickPointer, 40), setInterval(tickRoam, 33))
   screen.on('display-metrics-changed', () => {
     if (!validWin()) return
-    endDrag(); cancelRoam(); const p = clampWindow(win.getBounds(), body, areas()); win.setPosition(p.x, p.y); savePos()
+    endDrag(); cancelRoam(); const p = clampWindow(win.getBounds(), movementBody(), areas()); win.setPosition(p.x, p.y); savePos()
   })
   screen.on('display-removed', () => {
     if (!validWin()) return
-    endDrag(); cancelRoam(); const p = clampWindow(win.getBounds(), body, areas()); win.setPosition(p.x, p.y); savePos()
+    endDrag(); cancelRoam(); const p = clampWindow(win.getBounds(), movementBody(), areas()); win.setPosition(p.x, p.y); savePos()
   })
   await win.loadURL(server.petBase + '/dsh-pet/app')
   bootLog('started: ' + server.petBase + ' DSH=' + (link.status().base || 'offline'))

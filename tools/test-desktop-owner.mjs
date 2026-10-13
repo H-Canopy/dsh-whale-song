@@ -82,7 +82,7 @@ try {
     window.__bridgeMessages=[];window.__snapshots=0;window.__sayCalls=0;
     window.webkit={messageHandlers:{dshpetshell:{postMessage:(message)=>window.__bridgeMessages.push(message)}}};
     window.dshPetNative={
-      input:(s)=>{window.__snapshots++;window.__lastSnapshot=s},hover:()=>{},dragStart:()=>window.__bridgeMessages.push('drag'),dragMove:()=>{},dragEnd:()=>{},
+      input:(s)=>{window.__snapshots++;window.__lastSnapshot=s},resize:(size)=>window.__requestedSize=size,hover:()=>{},dragStart:()=>window.__bridgeMessages.push('drag'),dragMove:()=>window.__bridgeMessages.push('move'),dragEnd:()=>{},
       focusInput:(on,activate)=>window.__bridgeMessages.push({focus:on,activate}),
       composition:(on)=>window.__bridgeMessages.push({composition:on}),
       onCursor:()=>{},onVisibility:(fn)=>window.__deliverVisibility=fn,traceInput:()=>{}
@@ -127,6 +127,35 @@ try {
   await ev(`document.querySelector('.dshp-composer .dshp-close').click()`)
   await sleep(60)
   check('closing the composer releases DOM focus and input mode', await ev(`document.activeElement.tagName!=='TEXTAREA' && window.__bridgeMessages.filter(m=>m && typeof m==='object' && 'focus' in m).at(-1).focus===false`))
+  const bodyPoint = await ev(`(()=>{const s=DSHPet.inputSnapshot();const m=s.mask;let n=0,best=Infinity;for(let i=0;i<m.grid.length;i++){if(!m.grid[i])continue;const q=(i%m.w-m.w/2)**2+(Math.floor(i/m.w)-m.h/2)**2;if(q<best){best=q;n=i}}return{x:s.body.x+(n%m.w+.5)*s.body.w/m.w,y:s.body.y+(Math.floor(n/m.w)+.5)*s.body.h/m.h}})()`)
+  await ev(`window.__desktopActions=[];window.__originalDesktopClick=DSHPet.desktopClick;DSHPet.desktopClick=(x,y,double)=>{window.__desktopActions.push(double?'talk':'poke');return window.__originalDesktopClick(x,y,double)}`)
+  const clickBody = async () => {
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...bodyPoint, button: 'left', buttons: 1, clickCount: 1 })
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...bodyPoint, button: 'left', buttons: 0, clickCount: 1 })
+  }
+  await clickBody()
+  check('desktop single click invokes a real reaction and bubble', await ev(`window.__desktopActions.at(-1)==='poke' && DSHPet.state.overrideLeft>0 && document.querySelector('.dshp-bubble').classList.contains('dshp-on')`))
+  await sleep(550)
+  await clickBody(); await clickBody()
+  await waitFor(`document.querySelector('.dshp-composer').classList.contains('dshp-on') && document.activeElement.tagName==='TEXTAREA'`)
+  check('desktop double click opens dialogue without a second poke', await ev(`window.__desktopActions.slice(-2).join(',')==='poke,talk'`))
+  await ev(`document.querySelector('.dshp-composer .dshp-close').click()`)
+  const actionsBeforeDrag = await ev('window.__desktopActions.length')
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...bodyPoint, button: 'left', buttons: 1, clickCount: 1 })
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: bodyPoint.x + 15, y: bodyPoint.y + 15, buttons: 1 })
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: bodyPoint.x + 15, y: bodyPoint.y + 15, button: 'left', buttons: 0, clickCount: 1 })
+  check('dragging a body cannot poke or open dialogue', await ev(`window.__desktopActions.length===${actionsBeforeDrag} && window.__bridgeMessages.includes('move')`))
+  await ev(`document.querySelector('.dshp-dock button:nth-child(2)').click();Array.from(document.querySelectorAll('.dshp-tabs button')).find(b=>b.textContent==='设置').click()`)
+  const setHeight = async (height) => {
+    await ev(`(()=>{const r=document.querySelector('.dshp-label input[type=range]');r.value=${height};r.dispatchEvent(new Event('input',{bubbles:true}));r.dispatchEvent(new Event('change',{bubbles:true}))})()`)
+    await sleep(250)
+    return ev('DSHPet.state.view')
+  }
+  const small = await setHeight(150), large = await setHeight(360), smallAgain = await setHeight(150)
+  check('size control enlarges the model beyond the old fixed-window cap', large.w > small.w * 2)
+  check('size control can shrink back to the same dimensions', smallAgain.w === small.w && smallAgain.h === small.h)
+  check('model requests a fitting native viewport', await ev(`window.__requestedSize.width>=DSHPet.state.view.w+24 && window.__requestedSize.height>=DSHPet.state.view.h+60`))
+  check('settings remain inside viewport after repeated size changes', await ev(`(()=>{const r=document.querySelector('.dshp-menu').getBoundingClientRect();return r.x>=8&&r.y>=8&&r.right<=innerWidth-8&&r.bottom<=innerHeight-8})()`))
   console.log('结果：pass ' + pass + ' / fail 0')
 } finally {
   if (ws) ws.close()
