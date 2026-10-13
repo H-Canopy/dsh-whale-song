@@ -82,7 +82,7 @@ try {
     window.__bridgeMessages=[];window.__snapshots=0;window.__sayCalls=0;
     window.webkit={messageHandlers:{dshpetshell:{postMessage:(message)=>window.__bridgeMessages.push(message)}}};
     window.dshPetNative={
-      input:(s)=>{window.__snapshots++;window.__lastSnapshot=s},resize:(size)=>window.__requestedSize=size,hover:()=>{},dragStart:()=>window.__bridgeMessages.push('drag'),dragMove:()=>window.__bridgeMessages.push('move'),dragEnd:()=>{},
+      input:(s)=>{window.__snapshots++;window.__lastSnapshot=s},hover:()=>{},dragStart:()=>window.__bridgeMessages.push('drag'),dragMove:()=>window.__bridgeMessages.push('move'),dragEnd:()=>{},
       focusInput:(on,activate)=>window.__bridgeMessages.push({focus:on,activate}),
       composition:(on)=>window.__bridgeMessages.push({composition:on}),
       onCursor:()=>{},onVisibility:(fn)=>window.__deliverVisibility=fn,traceInput:()=>{}
@@ -151,11 +151,13 @@ try {
     await sleep(250)
     return ev('DSHPet.state.view')
   }
-  const small = await setHeight(150), large = await setHeight(360), smallAgain = await setHeight(150)
-  check('size control enlarges the model beyond the old fixed-window cap', large.w > small.w * 2)
+  const small = await setHeight(150), large = await setHeight(280), smallAgain = await setHeight(150)
+  check('size control enlarges the model within the desktop size limit', large.w > small.w * 1.5)
   check('size control can shrink back to the same dimensions', smallAgain.w === small.w && smallAgain.h === small.h)
-  check('model requests a fitting native viewport', await ev(`window.__requestedSize.width>=DSHPet.state.view.w+24 && window.__requestedSize.height>=DSHPet.state.view.h+60`))
+  check('desktop canvas stays fixed while CSS display size changes', await ev(`document.querySelector('canvas').width===${small.render.w}*devicePixelRatio && DSHPet.state.view.render.w===${large.render.w} && DSHPet.state.view.render.h===${large.render.h}`))
   check('settings remain inside viewport after repeated size changes', await ev(`(()=>{const r=document.querySelector('.dshp-menu').getBoundingClientRect();return r.x>=8&&r.y>=8&&r.right<=innerWidth-8&&r.bottom<=innerHeight-8})()`))
+  check('size settings expose a 150–280 range and cap large requests', await ev(`(()=>{const r=document.querySelector('.dshp-label input[type=range]');r.value=720;r.dispatchEvent(new Event('input',{bubbles:true}));return r.min==='150'&&r.max==='280'&&r.value==='280'&&DSHPet.state.view.w<=384&&DSHPet.state.view.h<=336})()`))
+  check('rapid enlarge/shrink never exposes an empty backing frame', await ev(`(()=>{const r=document.querySelector('.dshp-label input[type=range]');for(const h of [150,180,240,280,220,150,280,150]){r.value=h;r.dispatchEvent(new Event('input',{bubbles:true}));if(!DSHPet.sampleCanvas(24).some((v,i)=>i%4===3&&v>8))return false}return true})()`))
   console.log('结果：pass ' + pass + ' / fail 0')
 } finally {
   if (ws) ws.close()

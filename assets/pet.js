@@ -1631,6 +1631,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
           app.renderer.resolution = want
           app.renderer.resize(w, h)
           mask.dirty = true
+          if (model && lastView) fitModel(undefined, true)
         }
       } catch (err) {}
     }
@@ -1725,6 +1726,9 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
    * 否则轨道会随着面板变宽而移动，变成「怎么拖都追不上」。
    */
   let sizingSize = false
+  const DESKTOP_SIZE_MIN = 150
+  const DESKTOP_SIZE_MAX = 280
+  const DESKTOP_CANVAS_MAX_W = 384
 
   /**
    * 把面板夹回视口内。
@@ -1810,14 +1814,17 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     placePanel(ui && ui.mail && ui.mail.el)       // 头顶信封
   }
 
-  function fitModel(explicitHeight) {
+  function fitModel(explicitHeight, forcePaint = false) {
     if (!model || !app) return
     const im = model.internalModel
     // 只信 internalModel：Live2DModel 继承 PIXI Container，没有自己的 width 取值器
     const baseW = im.width || im.originalWidth || 1
     const baseH = im.height || im.originalHeight || 1
     const saved = readLayout()
-    const wanted = clamp(Number(explicitHeight) || Number(saved.height) || CFG.height, 120, 900)
+    const desktop = !!window.dshPetNative
+    const rawWanted = Number(explicitHeight) || Number(saved.height) || CFG.height
+    const wanted = clamp(rawWanted, desktop ? DESKTOP_SIZE_MIN : 120, desktop ? DESKTOP_SIZE_MAX : 900)
+    if (desktop && explicitHeight == null && rawWanted !== wanted) saveLayout({ height: wanted })
     // 用户明确要求：一直用「整张桌子」，不做上半身/只有头的取景。
     const mode = 'full'
     const frac = FIT_FRACTION[mode] || 1
@@ -1841,23 +1848,30 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     // 缩放按**实体高度**算（不是视窗高度）：加了余量之后她的大小和以前一模一样，
     // 只是周围多出一圈空间。
     let scale = wanted / (ch * frac * baseH)
-    const desktop = !!window.dshPetNative
-    const maxW = desktop ? Math.max(240, window.screen.availWidth - 32) : Math.max(240, window.innerWidth * (CFG.maxWidthRatio || 0.5))
+    const maxW = desktop ? Math.min(DESKTOP_CANVAS_MAX_W, Math.max(180, window.screen.availWidth - 32)) : Math.max(240, window.innerWidth * (CFG.maxWidthRatio || 0.5))
     if (viewWModel * scale > maxW) scale = maxW / viewWModel
     if (desktop) scale = Math.min(scale, Math.max(180, window.screen.availHeight - 96) / viewHModel)
 
     const w = Math.max(40, Math.round(viewWModel * scale))
     const h = Math.max(40, Math.round(viewHModel * scale))
+    // Keep the desktop backing canvas fixed; resizing WebGL clears it between paints.
+    const renderScale = desktop ? Math.min(DESKTOP_SIZE_MAX / (ch * frac * baseH), maxW / viewWModel,
+      Math.max(180, window.screen.availHeight - 96) / viewHModel) : scale
+    const renderW = desktop ? Math.round(viewWModel * renderScale) : w
+    const renderH = desktop ? Math.round(viewHModel * renderScale) : h
+    const resized = app.renderer.screen.width !== renderW || app.renderer.screen.height !== renderH
 
-    model.scale.set(scale)
+    model.scale.set(renderScale)
     // 锚点放到左上角：position 就等于「模型画布左上角在容器里的位置」，算起来最直观
     model.anchor.set(0, 0)
-    app.renderer.resize(w, h)
+    if (resized) app.renderer.resize(renderW, renderH)
     const padYModel = ch * frac * baseH * PAD
     model.position.set(
-      -Math.round((centerXModel - viewWModel / 2) * scale),
-      -Math.round((box.y0 * baseH - padYModel) * scale),
+      -Math.round((centerXModel - viewWModel / 2) * renderScale),
+      -Math.round((box.y0 * baseH - padYModel) * renderScale),
     )
+    app.view.style.width = w + 'px'
+    app.view.style.height = h + 'px'
 
     ui.stage.style.width = w + 'px'
     ui.stage.style.height = h + 'px'
@@ -1873,13 +1887,13 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       // 面板自己一套缩放：夹在 0.85~1.15，缩太小就没法操作了
       ui.root.style.setProperty('--dshp-ps', clamp(h / UI_BASE_HEIGHT, 0.85, 1.15).toFixed(3))
     }
-    if (window.dshPetNative?.resize) window.dshPetNative.resize({ width: w + 24, height: h + Math.max(60, dockClearance() + 20) })
-    mask.dirty = true
+    if (resized) mask.dirty = true
     lastView = {
       w,
       h,
       mode,
       scale: Number(scale.toFixed(4)),
+      render: { w: renderW, h: renderH },
       content: {
         x0: +box.x0.toFixed(3),
         y0: +box.y0.toFixed(3),
@@ -1887,6 +1901,8 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
         y1: +box.y1.toFixed(3),
       },
     }
+    // Paint a changed backing store in the same turn instead of exposing an empty frame.
+    if (resized || forcePaint) app.renderer.render(app.stage)
     return lastView
   }
 
@@ -2050,6 +2066,13 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     const h = root.getBoundingClientRect().height || 0
     const dock = dockClearance()
     applyTheme()   // 两条定位路径都要套用外观（原来只在 applyEdge 里设，自由摆放时主题不生效）
+    if (window.dshPetNative) {
+      // Native dragging owns the desktop position. Keep the feet steady inside its viewport.
+      root.style.left = 'auto'; root.style.right = '12px'
+      root.style.top = 'auto'; root.style.bottom = '80px'
+      delete root.dataset.edge
+      return
+    }
 
     if (layout.edge === 'left' || layout.edge === 'right') {
       applyEdge(layout.edge, layout.edgeY != null ? layout.edgeY : vh - h - dock - EDGE_GAP)
@@ -4206,13 +4229,15 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     label.append($('span', null, '大小'))
     const range = document.createElement('input')
     range.type = 'range'
-    range.min = '150'
-    range.max = '720'
-    range.value = String(clamp(Number(readLayout().height) || CFG.height, 150, 720))
+    const minSize = window.dshPetNative ? DESKTOP_SIZE_MIN : 150
+    const maxSize = window.dshPetNative ? DESKTOP_SIZE_MAX : 720
+    range.min = String(minSize)
+    range.max = String(maxSize)
+    range.value = String(clamp(Number(readLayout().height) || CFG.height, minSize, maxSize))
     range.title = '也可以直接拖（点 − / + 更省事）'
     // 主人要求：大小主要用「加 / 减」点一下调，不要只能拖滑块
     const stepSize = (delta) => {
-      const next = clamp(Number(range.value) + delta, 150, 720)
+      const next = clamp(Number(range.value) + delta, minSize, maxSize)
       range.value = String(next)
       sizeOut.textContent = next + 'px'
       fitModel(next)

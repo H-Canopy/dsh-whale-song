@@ -7,7 +7,6 @@ contextBridge.exposeInMainWorld('webkit', {
 })
 contextBridge.exposeInMainWorld('dshPetNative', {
   input: (snapshot) => ipcRenderer.send('pet-input', snapshot),
-  resize: (size) => ipcRenderer.send('pet-size', size),
   hover: (point) => ipcRenderer.send('pet-hover', point),
   dragStart: (point) => ipcRenderer.send('drag-start', point),
   dragMove: (delta) => ipcRenderer.send('drag-move', delta),

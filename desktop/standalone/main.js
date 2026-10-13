@@ -36,7 +36,6 @@ let roam = null
 let nextRoamAt = Date.now() + 25000
 let pointer = null
 let geometryUntil = 0
-let resizeAnchor = null
 let shuttingDown = false
 let ownerEndpoint = ''
 let priorOwnerEndpoint
@@ -139,7 +138,8 @@ function inputSnapshot(snapshot) {
   const rect = (r) => r && ['x', 'y', 'w', 'h'].every((key) => Number.isFinite(r[key])) && r.w > 0 && r.h > 0 && r.w < 2000 && r.h < 2000
   if (!rect(snapshot.body)) return
   const newBody = snapshot.body
-  const changed = !geometry || Math.abs(body.x - newBody.x) > 2 || Math.abs(body.y - newBody.y) > 2
+  const first = !geometry
+  const changed = first || Math.abs(body.x - newBody.x) > 2 || Math.abs(body.y - newBody.y) > 2
     || Math.abs(body.w - newBody.w) > 2 || Math.abs(body.h - newBody.h) > 2
   body = newBody
   const m = snapshot.mask
@@ -150,12 +150,12 @@ function inputSnapshot(snapshot) {
   if (typeof snapshot.lowPower === 'boolean') lowPower = snapshot.lowPower
   rendererReady = true
   geometryUntil = Date.now() + 1500
-  if ((changed || resizeAnchor) && !drag && validWin()) {
-    const saved = resizeAnchor || readJSON(path.join(app.getPath('userData'), 'pos.json'), null)
-    resizeAnchor = null
+  if (changed && !drag && validWin()) {
     const current = win.getBounds()
-    const p = restorePosition(saved, movementBody(), areas(), current)
-    win.setPosition(p.x, p.y)
+    const p = first ? restorePosition(readJSON(path.join(app.getPath('userData'), 'pos.json'), null), movementBody(), areas(), current)
+      : clampWindow(current, movementBody(), areas())
+    if (p.x !== current.x || p.y !== current.y) win.setPosition(p.x, p.y)
+    savePos()
   }
   if (geometry.roamBlocked || geometry.status !== 'idle') cancelRoam()
 }
@@ -317,22 +317,6 @@ function registerIPC() {
       + ' hit=' + hitKind(point.x, point.y) + ' ignore=' + lastIgnore)
   })
   ipcMain.on('pet-input', (event, data) => { if (trusted(event)) inputSnapshot(data) })
-  ipcMain.on('pet-size', (event, size) => {
-    if (!trusted(event) || petHidden || !size || !Number.isFinite(size.width) || !Number.isFinite(size.height)) return
-    if (size.width <= 0 || size.height <= 0 || size.width > 2000 || size.height > 2000) return
-    const current = win.getBounds()
-    const area = screen.getDisplayNearestPoint({ x: Math.round(current.x + body.x + body.w / 2), y: Math.round(current.y + body.y + body.h / 2) }).workArea
-    const even = (n) => Math.ceil(n / 2) * 2
-    const width = even(Math.min(area.width, Math.max(WIN_W, size.width)))
-    const height = even(Math.min(area.height, Math.max(WIN_H, size.height)))
-    if (Math.abs(current.width - width) < 3 && Math.abs(current.height - height) < 3) return
-    endDrag(); cancelRoam()
-    if (!resizeAnchor) resizeAnchor = savedPosition(current, body, areas())
-    geometryUntil = 0
-    lastIgnore = null; setIgnoreMouse(false)
-    win.setBounds({ ...current, width, height })
-    bootLog('viewport ' + width + 'x' + height)
-  })
   ipcMain.on('pet-hover', (event, point) => {
     if (!trusted(event) || drag || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return
     // Forwarded renderer mouse coordinates can arrive late after moving/showing a window.

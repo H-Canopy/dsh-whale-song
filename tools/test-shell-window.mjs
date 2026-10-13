@@ -321,23 +321,19 @@ try {
     item.click({ checked: false })
     assert.equal(JSON.parse(fs.readFileSync(path.join(userData, 'settings.json'))).roaming, false)
   })
-  test('viewport grows and shrinks for model size while preserving its screen anchor', () => {
+  test('size updates keep native viewport stable and persist the current layout anchor', () => {
     trayClick(); snapshot()
     win.setPosition(400, 100)
     const before = win.getBounds()
-    const resizedBody = { x: 10, y: 50, w: 600, h: 450 }
-    ipc.get('pet-size')(sender, { width: 644, height: 760 })
-    assert.equal(win.bounds.width, 644); assert.equal(win.bounds.height, 760)
+    const resizedBody = { x: 24, y: 186, w: 384, h: 334 }
     ipc.get('pet-input')(sender, { body: resizedBody, mask, panels: [], status: 'idle' })
-    assert.equal(win.bounds.x + resizedBody.x, before.x + body.x)
-    assert.equal(win.bounds.y + resizedBody.y, before.y + body.y)
+    assert.deepEqual(win.getBounds(), before)
+    const saved = JSON.parse(fs.readFileSync(path.join(userData, 'pos.json')))
+    assert.equal(saved.bodyX, before.x + resizedBody.x)
+    assert.equal(saved.bodyY, before.y + resizedBody.y)
     const count = nativeCalls.filter((call) => call[0] === 'bounds').length
-    ipc.get('pet-size')(sender, { width: 644, height: 760 })
-    ipc.get('pet-size')({ sender: {} }, { width: 800, height: 900 })
-    ipc.get('pet-size')(sender, { width: Infinity, height: 900 })
+    ipc.get('pet-input')(sender, { body: { x: 200, y: 340, w: 208, h: 180 }, mask, panels: [], status: 'idle' })
     assert.equal(nativeCalls.filter((call) => call[0] === 'bounds').length, count)
-    ipc.get('pet-size')(sender, { width: 200, height: 200 })
-    assert.equal(win.bounds.width, 420); assert.equal(win.bounds.height, 600)
     snapshot()
   })
   test('ownership preserves unrelated DSH config and is released on exit', () => {
