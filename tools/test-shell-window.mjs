@@ -82,6 +82,7 @@ class FakeWindow {
     this.events = new Map(); this.visible = false
     this.webContents = {
       focus: () => nativeCalls.push(['webFocus']),
+      invalidate: () => nativeCalls.push(['invalidate']), setBackgroundThrottling: () => {},
       on: (name, fn) => this.events.set('web:' + name, fn), setWindowOpenHandler() {},
       send: (...args) => nativeCalls.push(['send', ...args]), executeJavaScript: async () => {},
       reload: () => nativeCalls.push(['reload']),
@@ -149,7 +150,8 @@ try {
   const tickRoam = intervals.find((item) => item.ms === 33).fn
   const mask = { w: 4, h: 4, grid: Array(16).fill(1) }
   mask.grid[0] = 0
-  const snapshot = (panels = [], status = 'idle') => ipc.get('pet-input')(sender, { body, mask, panels, status })
+  const recoveryId = () => nativeCalls.filter((c) => c[0] === 'send' && c[1] === 'pet-recovery').at(-1)?.[2].id || 0
+  const snapshot = (panels = [], status = 'idle') => ipc.get('pet-input')(sender, { body, mask, panels, status, renderAge: 0, recoveryId: recoveryId() })
   test('one transparent window starts without taking focus', () => {
     assert.equal(windows.length, 1); assert.equal(win.options.focusable, false)
     assert.equal(win.options.transparent, true); assert.equal(win.options.webPreferences.nodeIntegration, false)
@@ -342,14 +344,6 @@ try {
     assert.equal(nativeCalls.filter((call) => call[0] === 'bounds').length, count)
     snapshot()
   })
-  test('ownership preserves unrelated DSH config and is released on exit', () => {
-    const cfg = JSON.parse(fs.readFileSync(path.join(home, 'dsh-live2d-pet.json')))
-    assert.match(cfg.desktopEndpoint, /^http:\/\/127\.0\.0\.1:54321\/dsh-pet\/owner\//)
-    assert.equal(cfg.lookAtCursor, false)
-    events.get('before-quit')()
-    const released = JSON.parse(fs.readFileSync(path.join(home, 'dsh-live2d-pet.json')))
-    assert.equal(released.desktopEndpoint, undefined); assert.equal(released.height, 180)
-  })
   test('generated files exactly match their versioned source templates', () => {
     for (const name of ['main', 'preload']) {
       const source = fs.readFileSync(path.join(ROOT, 'tools', 'shell-gen', 'templates', name + '.cjs'), 'utf8')
@@ -419,6 +413,58 @@ try {
     item.click()
     assert(nativeCalls.some((c) => c[0] === 'reload'), '必须真的重载页面（重跑 main() 才能重建掩码与几何）')
     assert.equal(nativeCalls.filter((c) => c[0] === 'ignore').at(-1)[1], false, '重载期间保持可交互')
+  })
+  test('resume requests renderer repaint and rejects pre-resume snapshots', () => {
+    snapshot()
+    powerHandlers.get('resume')()
+    assert(nativeCalls.some(c => c[0] === 'invalidate'))
+    const message = nativeCalls.filter(c => c[0] === 'send' && c[1] === 'pet-recovery').at(-1)[2]
+    assert.equal(message.expanded, true)
+    ipc.get('pet-input')(sender, { body, mask, panels: [], renderAge: 0, recoveryId: message.id - 1 })
+    assert.equal(ipc.get('handle:pet-diagnostics')(sender).rendererReady, false)
+    snapshot()
+    assert.equal(ipc.get('handle:pet-diagnostics')(sender).rendererReady, true)
+  })
+  test('suspend cancels a held drag; resume re-enables a new drag', () => {
+    snapshot(); ipc.get('drag-start')(sender, { x: 320, y: 490 })
+    powerHandlers.get('suspend')()
+    assert.equal(ipc.get('handle:pet-diagnostics')(sender).drag, false)
+    assert(nativeCalls.some(c => c[0] === 'send' && c[1] === 'pet-suspend'))
+    powerHandlers.get('resume')(); snapshot()
+    ipc.get('drag-start')(sender, { x: 320, y: 490 })
+    assert.equal(ipc.get('handle:pet-diagnostics')(sender).drag, true)
+    ipc.get('drag-end')(sender, { dx: 0, dy: 0 })
+  })
+  test('frozen frames trigger recovery even while input geometry keeps refreshing', () => {
+    const tick = intervals.find(item => item.ms === 1000).fn
+    snapshot()
+    ipc.get('pet-input')(sender, { body, mask, panels: [], renderAge: 4000 })
+    tick()
+    assert.equal(nativeCalls.filter(c => c[0] === 'send' && c[1] === 'pet-recovery').at(-1)[2].reason, 'watchdog')
+    const count = nativeCalls.filter(c => c[0] === 'reload').length
+    now += 5100; tick()
+    assert.equal(nativeCalls.filter(c => c[0] === 'reload').length, count + 1)
+    tick(); now += 5100; tick()
+    assert.equal(nativeCalls.filter(c => c[0] === 'reload').length, count + 1, 'watchdog must not repeatedly reload a failed renderer')
+    snapshot()
+  })
+  test('cold renderer announcing collapsed state remains a draggable recovery tab', () => {
+    win.events.get('web:did-start-loading')?.()
+    ipc.get('pet-ready')(sender, { collapsed: true })
+    const state = nativeCalls.filter(c => c[0] === 'send' && c[1] === 'pet-recovery').at(-1)[2]
+    assert.equal(state.expanded, false)
+    ipc.get('pet-input')(sender, { collapsed: true, panels: [{ x: 240, y: 490, w: 100, h: 32 }], recoveryId: state.id, renderAge: 0 })
+    ipc.get('drag-start')(sender, { x: 280, y: 500 })
+    assert.equal(ipc.get('handle:pet-diagnostics')(sender).drag, true)
+    ipc.get('drag-end')(sender, { dx: 0, dy: 0 }); trayClick(); snapshot()
+  })
+  test('ownership preserves unrelated DSH config and is released on exit', () => {
+    const cfg = JSON.parse(fs.readFileSync(path.join(home, 'dsh-live2d-pet.json')))
+    assert.match(cfg.desktopEndpoint, /^http:\/\/127\.0\.0\.1:54321\/dsh-pet\/owner\//)
+    assert.equal(cfg.lookAtCursor, false)
+    events.get('before-quit')()
+    const released = JSON.parse(fs.readFileSync(path.join(home, 'dsh-live2d-pet.json')))
+    assert.equal(released.desktopEndpoint, undefined); assert.equal(released.height, 180)
   })
   console.log('结果：pass ' + pass + ' / fail 0')
 } finally {

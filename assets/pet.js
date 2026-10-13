@@ -866,6 +866,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
   const EXPR = {}
   /** 最近一次取景结果，供诊断用 */
   let lastView = null
+  let lastRenderAt = -1
   /** 角色实体在模型画布里的归一化范围，启动时测一次；null = 没测出来（退回整张画布） */
   let contentBox = null
   /** 模型真实存在的参数 id 集合 */
@@ -1666,6 +1667,9 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     app.ticker.maxFPS = PERF.low ? 20 : 30
     applyPerf()
     ui.stage.appendChild(app.view)
+    app.view.addEventListener('webglcontextrestored', () => {
+      if (window.dshPetNative?.requestRecovery) window.dshPetNative.requestRecovery('context-restored')
+    })
 
     const { Live2DModel } = PIXI.live2d
     Live2DModel.registerTicker(PIXI.Ticker)
@@ -1693,6 +1697,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     // 掩码在 postrender 里采：此刻 WebGL 缓冲刚画好，且模型的世界变换已生效。
     // 必须在测量之前注册——测量就是靠它把画面读出来算实体范围的。
     app.renderer.on('postrender', () => {
+      lastRenderAt = performance.now()
       // 桌面壳里掩码还要拿去裁窗口（SetWindowRgn），而她的姿势/表情/道具一直在变：
       // 原来掩码只在尺寸/取景变化（mask.dirty）时才重采，等于一张「定格快照」，
       // 之后任何偏离快照的部位（举起的道具、尾巴、换姿势）既点不中、也会被窗口区域裁掉。
@@ -1711,6 +1716,11 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
 
     document.addEventListener('visibilitychange', () => {
       if (!app) return
+      if (window.dshPetNative) {
+        // Native suspend/resume owns this lifecycle; a hidden document is not a stopped pet.
+        if (!document.hidden && window.dshPetNative.requestRecovery) window.dshPetNative.requestRecovery('visibility')
+        return
+      }
       if (document.hidden) app.ticker.stop()
       else app.ticker.start()
     })
@@ -1887,7 +1897,11 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       // 面板自己一套缩放：夹在 0.85~1.15，缩太小就没法操作了
       ui.root.style.setProperty('--dshp-ps', clamp(h / UI_BASE_HEIGHT, 0.85, 1.15).toFixed(3))
     }
-    if (resized) mask.dirty = true
+    if (resized) {
+      mask.dirty = true
+      // A changed backing store invalidates the reference measurement mask immediately.
+      mask.lastBuild = performance.now() - 301
+    }
     lastView = {
       w,
       h,
@@ -4984,13 +4998,14 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     hitTest,
     inputSnapshot: (previousBuild) => {
       const stage = app && app.view && app.view.parentElement
-      if (!stage || !mask.grid || !mask.w || !mask.h) return null
+      if (!stage || !lastView || !mask.grid || !mask.w || !mask.h) return null
       const r = stage.getBoundingClientRect()
       const anchor = ui.root.getBoundingClientRect()
       return {
         body: { x: anchor.left, y: anchor.top, w: anchor.width, h: anchor.height },
         model: { x: r.left, y: r.top, w: r.width, h: r.height },
         maskAt: mask.lastBuild,
+        renderAge: lastRenderAt < 0 ? null : Math.max(0, performance.now() - lastRenderAt),
         mask: previousBuild === mask.lastBuild ? null : { w: mask.w, h: mask.h, grid: Array.from(mask.grid) },
       }
     },
@@ -5106,8 +5121,13 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     resumeDesktop: () => {
       if (!window.__DSHPET_SHELL__) return
       mask.dirty = true
-      if (app) app.start()
+      if (!app || !model || !lastView) return false
+      app.start()
+      PIXI.Ticker.shared.start()
+      app.renderer.render(app.stage)
+      return true
     },
+    pauseDesktop: () => { if (window.__DSHPET_SHELL__ && app) app.stop() },
     /** 壳子告诉页面「你记着的连接档位是哪一档」（设置页据此高亮） */
     setHostPref: (v) => {
       try {

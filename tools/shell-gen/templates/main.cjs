@@ -35,6 +35,14 @@ let roam = null
 let nextRoamAt = Date.now() + 25000
 let pointer = null
 let geometryUntil = 0
+let suspended = false
+let rendererLoaded = false
+let rendererAnnounced = false
+let recovery = null
+let recoverySequence = 0
+let recoveryReloaded = false
+let lastFrameAt = 0
+let frameObserved = false
 // 上一次上报的面板集合指纹：只在**变化时**打一行日志（见 inputSnapshot）。
 let lastPanelKey = null
 let shuttingDown = false
@@ -180,6 +188,9 @@ function hitKindSticky(x, y, keepInteractive) {
 }
 function cancelRoam(delay = 20000) { roam = null; nextRoamAt = Date.now() + delay }
 function inputSnapshot(snapshot) {
+  if (suspended || !snapshot || (recovery && snapshot.recoveryId !== recovery.id)) return
+  const frameFresh = !Number.isFinite(snapshot.renderAge) || snapshot.renderAge < 3000
+  if (Number.isFinite(snapshot.renderAge)) { frameObserved = true; lastFrameAt = Date.now() - Math.max(0, snapshot.renderAge) }
   // Hidden CSS transforms are not a new model anchor. Resume with a fresh snapshot on show.
   if (petHidden) {
     // Collapsing leaves a visible recovery tab; retain the model's saved anchor.
@@ -188,6 +199,7 @@ function inputSnapshot(snapshot) {
       && r.w > 0 && r.h > 0 && r.w < 500 && r.h < 500).slice(0, 1)
     geometry = { panels, mask: null, status: 'idle', roamBlocked: true }
     geometryUntil = Date.now() + 1500
+    if (frameFresh) completeRecovery()
     return
   }
   if (!snapshot || !snapshot.body || !Array.isArray(snapshot.panels)) return
@@ -225,7 +237,7 @@ function inputSnapshot(snapshot) {
     model: rect(snapshot.model) ? snapshot.model : newBody, status: String(snapshot.status || 'idle'),
     roamBlocked: typeof snapshot.roamBlocked === 'boolean' ? snapshot.roamBlocked : snapshot.panels.length > 0 }
   if (typeof snapshot.lowPower === 'boolean') lowPower = snapshot.lowPower
-  rendererReady = true
+  rendererReady = frameFresh
   geometryUntil = Date.now() + 1500
   if (changed && !drag && validWin()) {
     const current = win.getBounds()
@@ -235,9 +247,15 @@ function inputSnapshot(snapshot) {
     savePos()
   }
   if (geometry.roamBlocked || geometry.status !== 'idle') cancelRoam()
+  if (frameFresh) completeRecovery()
+}
+function completeRecovery() {
+  rendererReady = true
+  recoveryReloaded = false
+  if (recovery) { bootLog('recovery complete: ' + recovery.reason); recovery = null }
 }
 function tickPointer() {
-  if (!validWin() || !win.isVisible()) return
+  if (!validWin() || suspended || !win.isVisible()) return
   const p = screen.getCursorScreenPoint()
   const b = win.getBounds()
   // 用**迟滞版**判定：已经在交互态时，要离开她更远才恢复穿透。
@@ -254,7 +272,7 @@ function tickPointer() {
     // 为什么要记它：真机上出现过"**同一个光标坐标**、同一个 fresh=true，
     // 却在 hit=model / hit=none 之间来回翻" —— 有版本号就能一眼看出
     // 到底是"掩码重采导致判定翻转"还是别的原因在抖。
-    const fresh = geometryFresh()
+    const fresh = geometryFresh() && !recovery
     setIgnoreMouse(fresh ? kind === 'none' : false,
       'cursor=' + Math.round(p.x - b.x) + ',' + Math.round(p.y - b.y) + ' hit=' + kind
       + ' fresh=' + fresh + ' mask=' + (geometry ? geometry.maskAt : '-'))
@@ -286,7 +304,7 @@ function endDrag(delta) {
   bootLog('drag-end')
 }
 function tickRoam() {
-  if (!validWin() || petHidden || !win.isVisible() || !rendererReady || Date.now() > geometryUntil || lowPower
+  if (!validWin() || suspended || recovery || petHidden || !win.isVisible() || !rendererReady || Date.now() > geometryUntil || lowPower
     || !settings().roaming || drag || focusInput || !geometry || geometry.roamBlocked || geometry.status !== 'idle') return
   const now = Date.now()
   if (!roam) {
@@ -369,8 +387,10 @@ function hidePet() {
  * 重载页面会重跑 `main()`：重建掩码、重新上报几何，等于把她重置一遍。
  * 也放在托盘里，因为那时候她可能已经点不到了（正好需要一条不依赖她的入口）。
  */
-function reloadPet() {
+function reloadPet(automatic = false) {
   if (!validWin()) return
+  if (automatic !== true) recoveryReloaded = false
+  recovery = null
   endDrag()
   rendererReady = false
   geometry = null
@@ -382,20 +402,56 @@ function reloadPet() {
   syncTrayMenu()
 }
 /** 系统睡眠/唤醒后的自愈：清掉可能已经过期的几何，并强制恢复可交互。 */
-function onPowerResume(kind) {
+function onPowerResume(kind, grace = 5000) {
   if (!validWin()) return
+  suspended = false
+  pendingMove = null
   endDrag()
+  composing = false; focusInput = false
+  win.setFocusable(false)
   rendererReady = false
   geometry = null
   geometryUntil = 0
   lastIgnore = null
   setIgnoreMouse(false, 'power-' + kind)
+  pointer = null
   cancelRoam()
   bootLog('power ' + kind + ': geometry cleared, forcing interactive')
   // 位置也可能因为分辨率/显示器变化而落到屏幕外，夹回可见工作区。
   const cur = win.getBounds()
   const p = clampWindow({ x: cur.x, y: cur.y }, movementBody(), areas())
   if (p.x !== cur.x || p.y !== cur.y) win.setPosition(p.x, p.y)
+  win.setAlwaysOnTop(true, 'screen-saver')
+  if (!win.isVisible()) win.showInactive()
+  if (typeof win.webContents.setBackgroundThrottling === 'function') win.webContents.setBackgroundThrottling(false)
+  recovery = { id: ++recoverySequence, reason: kind, deadline: Date.now() + grace }
+  win.webContents.send('pet-recovery', { id: recovery.id, expanded: !petHidden, reason: kind })
+  win.webContents.focus()
+  if (typeof win.webContents.invalidate === 'function') win.webContents.invalidate()
+}
+function onPowerSuspend(kind) {
+  suspended = true
+  pendingMove = null; endDrag(); cancelRoam(); savePos()
+  recovery = null
+  if (validWin()) win.webContents.send('pet-suspend')
+  bootLog('power ' + kind + ': paused')
+}
+function tickRecovery() {
+  if (shuttingDown || suspended || !rendererLoaded || !validWin()) return
+  if (recovery) {
+    if (Date.now() < recovery.deadline) return
+    if (!recoveryReloaded) {
+      recoveryReloaded = true
+      bootLog('recovery timeout: ' + recovery.reason + ', reload once')
+      reloadPet(true)
+    } else {
+      bootLog('recovery timeout after reload; keeping interactive')
+      recovery = null
+    }
+    return
+  }
+  if (recoveryReloaded && !rendererReady) return
+  if (!geometryFresh() || (!petHidden && frameObserved && Date.now() - lastFrameAt > 3000)) onPowerResume('watchdog')
 }
 function syncTrayMenu() {
   if (!tray) return
@@ -439,7 +495,9 @@ function registerIPC() {
     return { bounds, cursor, local, hit: hitKind(local.x, local.y), ignore: lastIgnore,
       body, panels: geometry && geometry.panels, mask: geometry && geometry.mask && {
         w: geometry.mask.w, h: geometry.mask.h, solid: geometry.mask.grid.reduce((sum, on) => sum + !!on, 0) },
-      drag: !!drag, focusInput, composing, collapsed: petHidden, visible: win.isVisible(), rendererReady, geometryAge: Date.now() - (geometryUntil - 1500) }
+      drag: !!drag, focusInput, composing, collapsed: petHidden, visible: win.isVisible(), rendererReady,
+      suspended, recovering: !!recovery, recoveryId: recoverySequence, renderAge: frameObserved ? Date.now() - lastFrameAt : null,
+      geometryAge: Date.now() - (geometryUntil - 1500) }
   })
   ipcMain.on('pet-trace', (event, point) => {
     if (!trusted(event) || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return
@@ -447,6 +505,17 @@ function registerIPC() {
       + ' hit=' + hitKind(point.x, point.y) + ' ignore=' + lastIgnore)
   })
   ipcMain.on('pet-input', (event, data) => { if (trusted(event)) inputSnapshot(data) })
+  ipcMain.on('pet-ready', (event, state) => {
+    if (!trusted(event) || rendererAnnounced || !state || typeof state.collapsed !== 'boolean') return
+    rendererAnnounced = true
+    petHidden = state.collapsed
+    syncTrayMenu()
+    onPowerResume('renderer-ready')
+  })
+  ipcMain.on('pet-recover', (event, reason) => {
+    if (!trusted(event) || suspended || recovery || !['visibility', 'context-restored', 'manual'].includes(reason)) return
+    onPowerResume('renderer-' + reason)
+  })
   ipcMain.on('pet-hover', (event, point) => {
     if (!trusted(event) || drag || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return
     // Forwarded renderer mouse coordinates can arrive late after moving/showing a window.
@@ -500,7 +569,7 @@ async function start() {
   await link.start()
   server = await startPetServer({ repoRoot: resolveRepoRoot(path.resolve(__dirname, '..', '..')), dshLink: link,
     ownerPath: OWNER_PATH, ownerActive: () => rendererReady && validWin() && link.status().connected
-      && (petHidden || geometryFresh()) })
+      && (petHidden || suspended || geometryFresh()) })
   win = new BrowserWindow({
     width: WIN_W, height: WIN_H, frame: false, transparent: true, resizable: false,
     hasShadow: false, skipTaskbar: true, focusable: false, show: false, title: 'DS 鲸鱼娘桌宠',
@@ -515,9 +584,12 @@ async function start() {
   win.setPosition(initial.x, initial.y)
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('will-navigate', (event, url) => { if (!url.startsWith(server.petBase + '/dsh-pet/app')) event.preventDefault() })
+  win.webContents.on('did-start-loading', () => { rendererLoaded = false; rendererAnnounced = false; frameObserved = false; recovery = null })
   win.webContents.on('did-finish-load', () => {
+    rendererLoaded = true
     rendererReady = false; geometry = null
     win.webContents.executeJavaScript('window.DSHPet && DSHPet.setLowPower(' + lowPower + ')').catch(() => {})
+    onPowerResume('startup', 20000)
   })
   // 渲染进程挂了：几何全失效 → 强制可交互（别让她变成一块点不到的东西）
   win.webContents.on('render-process-gone', () => { rendererReady = false; geometry = null; endDrag(); lastIgnore = null; setIgnoreMouse(false) })
@@ -532,7 +604,7 @@ async function start() {
   link.onChange((state) => { bootLog('DSH ' + (state.connected ? 'connected: ' + state.base : 'disconnected')); cancelRoam(); syncTrayMenu() })
   syncTrayMenu()
   claimOwner()
-  timers.push(setInterval(tickPointer, 40), setInterval(tickRoam, 33))
+  timers.push(setInterval(tickPointer, 40), setInterval(tickRoam, 33), setInterval(tickRecovery, 1000))
   screen.on('display-metrics-changed', () => {
     if (!validWin()) return
     endDrag(); cancelRoam(); const p = clampWindow(win.getBounds(), movementBody(), areas()); win.setPosition(p.x, p.y); savePos()
@@ -546,6 +618,8 @@ async function start() {
   // 而唯一的恢复办法是重启壳（真机事故 2026-10-13）。这里清掉过期几何并强制可交互。
   // 用 powerMonitor 而不是"猜"：resume / unlock-screen 都是明确的系统事件。
   try {
+    powerMonitor.on('suspend', () => onPowerSuspend('suspend'))
+    powerMonitor.on('lock-screen', () => onPowerSuspend('lock'))
     powerMonitor.on('resume', () => onPowerResume('resume'))
     powerMonitor.on('unlock-screen', () => onPowerResume('unlock'))
   } catch (err) { bootLog('powerMonitor 不可用: ' + (err && err.message)) }

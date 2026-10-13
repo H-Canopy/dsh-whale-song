@@ -85,7 +85,10 @@ try {
       input:(s)=>{window.__snapshots++;window.__lastSnapshot=s},hover:()=>{},dragStart:()=>window.__bridgeMessages.push('drag'),dragMove:()=>window.__bridgeMessages.push('move'),dragEnd:()=>{},
       focusInput:(on,activate)=>window.__bridgeMessages.push({focus:on,activate}),
       composition:(on)=>window.__bridgeMessages.push({composition:on}),
-      onCursor:()=>{},onVisibility:(fn)=>window.__deliverVisibility=fn,traceInput:()=>{}
+      onCursor:()=>{},onVisibility:(fn)=>window.__deliverVisibility=fn,traceInput:()=>{},
+      ready:(state)=>window.__readyState=state,
+      requestRecovery:(reason)=>window.__bridgeMessages.push({recover:reason}),
+      onRecovery:(fn)=>window.__deliverRecovery=fn,onSuspend:(fn)=>window.__deliverSuspend=fn
     };
     const realFetch=window.fetch;
     window.fetch=(url,options)=>{
@@ -158,6 +161,15 @@ try {
   check('settings remain inside viewport after repeated size changes', await ev(`(()=>{const r=document.querySelector('.dshp-menu').getBoundingClientRect();return r.x>=8&&r.y>=8&&r.right<=innerWidth-8&&r.bottom<=innerHeight-8})()`))
   check('size settings expose a 150–280 range and cap large requests', await ev(`(()=>{const r=document.querySelector('.dshp-label input[type=range]');r.value=720;r.dispatchEvent(new Event('input',{bubbles:true}));return r.min==='150'&&r.max==='280'&&r.value==='280'&&DSHPet.state.view.w<=384&&DSHPet.state.view.h<=336})()`))
   check('rapid enlarge/shrink never exposes an empty backing frame', await ev(`(()=>{const r=document.querySelector('.dshp-label input[type=range]');for(const h of [150,180,240,280,220,150,280,150]){r.value=h;r.dispatchEvent(new Event('input',{bubbles:true}));if(!DSHPet.sampleCanvas(24).some((v,i)=>i%4===3&&v>8))return false}return true})()`))
+  await ev(`(()=>{const ta=document.querySelector('textarea');ta.value='恢复测试草稿';ta.dispatchEvent(new Event('input',{bubbles:true}));window.__deliverSuspend()})()`)
+  await sleep(300)
+  check('native suspension actually stops the render loop', await ev('DSHPet.inputSnapshot().renderAge>250'))
+  await ev(`window.__deliverRecovery({id:99,expanded:true,reason:'resume'})`)
+  await waitFor('DSHPet.inputSnapshot().renderAge<250 && window.__lastSnapshot.recoveryId===99')
+  check('recovery restarts rendering, refreshes mask and preserves the unsent draft', await ev(`document.querySelector('textarea').value==='恢复测试草稿' && window.__lastSnapshot.maskAt>0 && window.__lastSnapshot.renderAge<250`))
+  await send('Page.reload')
+  await waitFor(`!!window.DSHPet && !!DSHPet.inputSnapshot() && document.querySelector('textarea').value==='恢复测试草稿'`)
+  check('reload fallback restores draft from session storage', await ev(`document.querySelector('textarea').value==='恢复测试草稿' && window.__sayCalls===0`))
   console.log('结果：pass ' + pass + ' / fail 0')
 } finally {
   if (ws) ws.close()

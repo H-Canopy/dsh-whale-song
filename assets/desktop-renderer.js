@@ -9,6 +9,28 @@
   let nativeVisible = true
   let suppressTabClick = false
   let lastTap = null
+  let announced = false
+  let recoveryId = 0
+  let draftRestored = false
+  let lastDraft = null
+  const draftKey = 'dsh-pet:recovery-draft'
+  function keepDraft() {
+    const ta = document.querySelector('.dshp-composer textarea')
+    if (!ta) return
+    try {
+      if (!draftRestored) {
+        const saved = sessionStorage.getItem(draftKey)
+        if (saved !== null) ta.value = saved
+        draftRestored = true
+      }
+      if (ta.value !== lastDraft) {
+        lastDraft = ta.value
+        if (lastDraft) sessionStorage.setItem(draftKey, lastDraft)
+        else sessionStorage.removeItem(draftKey)
+      }
+    } catch {}
+  }
+  window.addEventListener('input', keepDraft, true)
   // ⚠️ 这里**不能**放 `.dshp-bubble`（对话气泡）。
   // 气泡是 `position:absolute; left:50%; bottom:100%` —— 悬在她**头顶上方居中**，而且是
   // `pointer-events:auto`。而主进程的 hitKind 与渲染进程的 kind() 都是"**面板优先于她**"，
@@ -26,12 +48,17 @@
     return { x: r.left, y: r.top, w: r.width, h: r.height }
   }
   function report() {
+    keepDraft()
     const pet = window.DSHPet
     const stage = document.querySelector('.dshp-stage')
     if (!pet || !stage || !pet.inputSnapshot) return
     const input = pet.inputSnapshot(lastMaskAt)
     if (input?.mask) lastMaskAt = input.maskAt
     if (input) latestBody = input.model || input.body
+    if (input && !announced) {
+      announced = true
+      if (native.ready) native.ready({ collapsed: document.body.classList.contains('dshp-pet-hidden') })
+    }
     const tab = document.querySelector('.dshp-tab')
     if (tab) {
       const anchor = input?.body || latestBody || rect(stage)
@@ -42,7 +69,7 @@
       for (const [key, value] of Object.entries(position)) if (tab.style[key] !== value) tab.style[key] = value
     }
     if (!nativeVisible || document.body.classList.contains('dshp-pet-hidden')) {
-      native.input({ collapsed: true, panels: tab && getComputedStyle(tab).display !== 'none' ? [rect(tab)] : [] })
+      native.input({ collapsed: true, recoveryId, renderAge: input?.renderAge, panels: tab && getComputedStyle(tab).display !== 'none' ? [rect(tab)] : [] })
       return
     }
     if (!input) return
@@ -52,7 +79,8 @@
         && cs.pointerEvents !== 'none' && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0
     }).map(rect)
     const roamBlocked = !!document.querySelector('.dshp-menu.dshp-on,.dshp-composer.dshp-on,.dshp-hud.dshp-on,.dshp-panel.dshp-on')
-    native.input({ body: input.body, model: input.model, mask: input.mask, panels, status: pet.state.agent.status, lowPower: pet.isLowPower(), roamBlocked })
+    native.input({ body: input.body, model: input.model, mask: input.mask, maskAt: input.maskAt, renderAge: input.renderAge,
+      recoveryId, panels, status: pet.state.agent.status, lowPower: pet.isLowPower(), roamBlocked })
   }
   function kind(x, y, target) {
     if (!nativeVisible || document.body.classList.contains('dshp-pet-hidden')) return target?.closest('.dshp-tab') ? 'tab' : 'none'
@@ -139,6 +167,29 @@
     lastMaskAt = -1
     syncFocus()
     report()
+  })
+  function resetPointer() {
+    if (down) { try { down.target.releasePointerCapture(down.id) } catch {} }
+    down = null; lastTap = null; suppressTabClick = false
+  }
+  if (native.onSuspend) native.onSuspend(() => {
+    resetPointer(); keepDraft()
+    if (window.DSHPet?.pauseDesktop) DSHPet.pauseDesktop()
+  })
+  if (native.onRecovery) native.onRecovery((state) => {
+    recoveryId = state.id
+    resetPointer(); keepDraft()
+    const active = document.activeElement
+    if (active?.matches('input,textarea,select') || active?.isContentEditable) active.blur()
+    if (native.composition) native.composition(false)
+    nativeVisible = state.expanded === true
+    if (window.DSHPet) {
+      DSHPet.setHidden(!nativeVisible, false)
+      try { DSHPet.resumeDesktop() } catch {}
+    }
+    lastMaskAt = -1
+    syncFocus(); report()
+    requestAnimationFrame(report)
   })
   native.onCursor((p) => { if (window.DSHPet && DSHPet.trackDesktopCursor) DSHPet.trackDesktopCursor(p.x, p.y) })
   setInterval(report, 200)
