@@ -21,8 +21,19 @@
 > 本仓库改了包名，所以**与上游包 `dsh-whale-girl-live2d` 可以并存**（互不替换）。
 > **装了/更新了要重启一次 DSH**（宿主插件只在启动时加载）；只改前端脚本刷新页面即可。
 >
-> **先看脸不装 DSH？** 双击 [`standalone/index.html`](standalone/index.html) 就能看到她在跑
-> （模型、物理、菜单、互动都在；但没有 agent 联动/钱包/音乐）。**搭配 DSH 才是完整版**。
+> **不想开 DSH，只想让她待在桌面上？** 这个 fork 做了**桌面壳**：
+> ```bash
+> npm run desktop:start        # 需要 Node + Electron，见 desktop/standalone/README.md
+> ```
+> **她自带本地服务，不依赖 DSH 是否在运行** —— DSH 关着她照样待在桌面上：
+> 模型、物理、**44 个表情 / 8 个动作的菜单**、点她互动**全都在**；还有自由拖放、
+> 透明区域点击穿透、可开关的自主漫游（闲着会自己挪个地方）。
+> 开着 DSH 时她**额外**获得 agent 联动、钱包和音乐 —— 所以是「**她本身完整可用，DSH 是增强**」，
+> 不是"搭配 DSH 才是完整版"。
+> 纯看模型、连 Electron 都不想装：双击 [`standalone/index.html`](standalone/index.html) 也行。
+>
+> > 这一条是本 fork 与**上游**最大的差别：上游的桌面客户端只是"加载 DSH 插件那一页"的
+> > 透明窗口（DSH 一关就没内容），详见 [`desktop/standalone/README.md`](desktop/standalone/README.md)。
 >
 > **归属与许可（请务必保留）**
 > · 角色形象 © **上善无形**（原作 OC「溟月」）/ **ZipZipPipe**（女仆鲸鱼娘二次设计）
