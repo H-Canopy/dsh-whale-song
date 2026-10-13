@@ -13,4 +13,6 @@ contextBridge.exposeInMainWorld('dshPetNative', {
   dragEnd: (delta) => ipcRenderer.send('drag-end', delta),
   focusInput: (on) => ipcRenderer.send('pet-focus', !!on),
   onCursor: (fn) => ipcRenderer.on('pet-cursor', (_event, point) => fn(point)),
+  diagnostics: () => ipcRenderer.invoke('pet-diagnostics'),
+  traceInput: (point) => ipcRenderer.send('pet-trace', point),
 })

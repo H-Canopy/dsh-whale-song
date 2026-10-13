@@ -243,6 +243,21 @@ function syncTrayMenu() {
 }
 function trusted(event) { return validWin() && event.sender === win.webContents }
 function registerIPC() {
+  if (typeof ipcMain.handle === 'function') ipcMain.handle('pet-diagnostics', (event) => {
+    if (!trusted(event)) return null
+    const bounds = win.getBounds()
+    const cursor = screen.getCursorScreenPoint()
+    const local = { x: cursor.x - bounds.x, y: cursor.y - bounds.y }
+    return { bounds, cursor, local, hit: hitKind(local.x, local.y), ignore: lastIgnore,
+      body, panels: geometry && geometry.panels, mask: geometry && geometry.mask && {
+        w: geometry.mask.w, h: geometry.mask.h, solid: geometry.mask.grid.reduce((sum, on) => sum + !!on, 0) },
+      drag: !!drag, rendererReady, geometryAge: Date.now() - (geometryUntil - 1500) }
+  })
+  ipcMain.on('pet-trace', (event, point) => {
+    if (!trusted(event) || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return
+    bootLog('input ' + String(point.type).slice(0, 20) + ' local=' + point.x + ',' + point.y
+      + ' hit=' + hitKind(point.x, point.y) + ' ignore=' + lastIgnore)
+  })
   ipcMain.on('pet-input', (event, data) => { if (trusted(event)) inputSnapshot(data) })
   ipcMain.on('pet-hover', (event, point) => {
     if (!trusted(event) || drag || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return

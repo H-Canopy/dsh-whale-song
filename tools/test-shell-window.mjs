@@ -104,7 +104,7 @@ const electron = {
   app, BrowserWindow: FakeWindow, Tray: FakeTray, Menu: { buildFromTemplate: (menu) => menu },
   screen: { getAllDisplays: () => [display], getPrimaryDisplay: () => display,
     getDisplayNearestPoint: () => display, getCursorScreenPoint: () => cursor, on() {} },
-  shell: { openExternal: async () => {} }, ipcMain: { on: (name, fn) => ipc.set(name, fn) },
+  shell: { openExternal: async () => {} }, ipcMain: { on: (name, fn) => ipc.set(name, fn), handle: (name, fn) => ipc.set('handle:' + name, fn) },
   nativeImage: { createFromPath: () => ({ isEmpty: () => false, resize: () => ({}) }), createEmpty: () => ({}) },
   dialog: { showMessageBox: async () => {}, showErrorBox: (...args) => { throw new Error(args.join(': ')) } },
 }
@@ -136,6 +136,17 @@ try {
   })
   snapshot()
   const p = win.getBounds()
+  test('input diagnostics report current native geometry and reject foreign senders', () => {
+    const diagnostics = ipc.get('handle:pet-diagnostics')
+    assert.equal(diagnostics({ sender: {} }), null)
+    const state = diagnostics(sender)
+    assert.deepEqual({ ...state.body }, body)
+    assert.equal(state.mask.solid, 15)
+    assert.equal(state.rendererReady, true)
+    assert.equal(state.drag, false)
+    ipc.get('pet-trace')(sender, { type: 'pointerdown', x: 320, y: 490 })
+    assert.match(fs.readFileSync(path.join(userData, 'boot.log'), 'utf8'), /input pointerdown local=320,490 hit=model/)
+  })
   test('click-through changes only when crossing a model boundary', () => {
     cursor = { x: p.x + body.x + 150, y: p.y + body.y + 150 }
     tickPointer()

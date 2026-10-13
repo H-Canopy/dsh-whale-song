@@ -36,11 +36,13 @@
     return 'none'
   }
   window.addEventListener('pointerdown', (e) => {
+    if (native.traceInput) native.traceInput({ type: 'pointerdown', x: e.clientX, y: e.clientY })
     if (e.button !== 0 || kind(e.clientX, e.clientY, e.target) !== 'model') return
     down = { x: e.screenX, y: e.screenY, dx: 0, dy: 0, moved: false, target: e.target, id: e.pointerId }
     try { e.target.setPointerCapture(e.pointerId) } catch {}
     native.dragStart({ x: e.clientX, y: e.clientY })
   }, true)
+  window.addEventListener('mousedown', (e) => { if (native.traceInput) native.traceInput({ type: 'mousedown', x: e.clientX, y: e.clientY }) }, true)
   window.addEventListener('pointermove', (e) => {
     if (!down) { native.hover({ x: e.clientX, y: e.clientY }); return }
     if (!(e.buttons & 1)) { native.dragEnd({ dx: down.dx, dy: down.dy }); down = null; return }

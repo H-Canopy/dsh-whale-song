@@ -37,6 +37,8 @@ DSH 关闭时仍可显示模型、换表情/道具、拖动和漫游、读取系
 
 日志与位置：`%APPDATA%/DS-WhaleSong-Pet/boot.log`（UTF-8）、`pos.json`。壳设置在同目录 `settings.json`，包括 `roaming`、`lowPower`、`hostPref`。旧 `shapeWindow` 与 `fullscreenPrimary` 不再驱动运行时；窗口成型源码仅保留为独立诊断工具。
 
+若出现“模型在动但拖不动/按钮点不了”，先看日志中的 `input pointerdown`、`input mousedown`、`drag-start`、`drag-end`，区分事件根本未到达和命中/拖动计算失败。调试控制台可用 `await dshPetNative.diagnostics()` 获取当前坐标、命中结果、穿透状态和快照新鲜度。诊断仅记录事件类型和位置，不记录输入框文字。
+
 ## 源码与验证
 
 见 `tools/shell-gen/README.md`。主进程与 preload 改模板再生成。
