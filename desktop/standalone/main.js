@@ -76,6 +76,28 @@ const areas = () => screen.getAllDisplays().map((d) => d.workArea)
 const validWin = () => win && !win.isDestroyed()
 // Keep the toolbar below the model inside the monitor work area too.
 const movementBody = () => ({ ...body, h: body.h + 48 })
+/**
+ * 用于**恢复位置 / 漫游 / 唤醒 / 开机**的夹取框 = **整个窗口**（留 8px 边距）。
+ *
+ * 为什么不用 movementBody()：容器 420×600，而本体在 y≈342..552。只夹本体的话，
+ * 窗口允许 `y = -342`（头被切）到 `y ≈ +206`（下巴被切）—— **被切掉一半仍算"合法位置"**。
+ * 真机实测的后果：窗口滑到 (1923,663)-(2556,1566)（屏幕只有 2560×1600），右下角都被切掉，
+ * 用户瞄着她"看起来在"的位置点，实际落在切掉区域或轮廓外的空气里 ⇒ 穿透 ⇒
+ * 表现为"点不了、拖不动"，而她其实还活着（实测 5/6 个点可点）。
+ *
+ * 也**不**按模型框加百分比边距：那个框是页面按阶段元素报的，和她实际像素对不上，
+ * 试过 padY=12%（允许 y 到 -317，头几乎全被切）和 padTop=4（仍留 338px 上方余量），
+ * 都是在拍脑袋调参。直接约束**整个窗口**最直白：她永远完整可见、永远能点到。
+ *
+ * 代价：她的纵向活动范围很小（窗口 y 只能 0..48 左右）。这是**有意的取舍** ——
+ * 见交接待办："永远可见可点"优先于"能上下漫游"。
+ *
+ * ⚠️ 只用在"她自己决定位置"的场合（恢复、漫游、唤醒、开机）。
+ * **拖拽仍然用 movementBody()** —— 主人手拖时想让她贴边只露一部分，那是主人的意图，
+ * 不该被自动拉回来。
+ */
+const WINDOW_MARGIN = 8
+const windowBox = () => ({ x: WINDOW_MARGIN, y: WINDOW_MARGIN, w: WIN_W - WINDOW_MARGIN * 2, h: WIN_H - WINDOW_MARGIN * 2 })
 function bootLog(message) {
   try {
     const file = path.join(app.getPath('userData'), 'boot.log')
@@ -247,7 +269,7 @@ function inputSnapshot(snapshot) {
   if (changed && !drag && validWin()) {
     const current = win.getBounds()
     const p = first ? restorePosition(readJSON(path.join(app.getPath('userData'), 'pos.json'), null), movementBody(), areas(), current)
-      : clampWindow(current, movementBody(), areas())
+      : clampWindow(current, windowBox(), areas())
     if (p.x !== current.x || p.y !== current.y) win.setPosition(p.x, p.y)
     savePos()
   }
@@ -319,14 +341,14 @@ function tickRoam() {
     const target = clampWindow({
       x: display.x + 12 + Math.random() * Math.max(0, display.width - body.w - 24) - body.x,
       y: display.y + 12 + Math.random() * Math.max(0, display.height - body.h - 24) - body.y,
-    }, movementBody(), [display])
+    }, windowBox(), [display])
     const distance = Math.hypot(target.x - bounds.x, target.y - bounds.y)
     roam = { from: bounds, target, start: now, duration: Math.max(2000, distance / 55 * 1000) }
   }
   const t = Math.min(1, (now - roam.start) / roam.duration)
   const smooth = t * t * (3 - 2 * t)
   const next = clampWindow({ x: roam.from.x + (roam.target.x - roam.from.x) * smooth,
-    y: roam.from.y + (roam.target.y - roam.from.y) * smooth }, movementBody(), areas())
+    y: roam.from.y + (roam.target.y - roam.from.y) * smooth }, windowBox(), areas())
   const b = win.getBounds()
   if (next.x !== b.x || next.y !== b.y) win.setBounds({ ...next, width: roam.from.width, height: roam.from.height })
   if (t === 1) { savePos(); cancelRoam(20000 + Math.random() * 25000) }
@@ -465,7 +487,7 @@ function onPowerResume(kind, grace = 5000) {
   bootLog('power ' + kind + ': geometry cleared, forcing interactive')
   // 位置也可能因为分辨率/显示器变化而落到屏幕外，夹回可见工作区。
   const cur = win.getBounds()
-  const p = clampWindow({ x: cur.x, y: cur.y }, movementBody(), areas())
+  const p = clampWindow({ x: cur.x, y: cur.y }, windowBox(), areas())
   if (p.x !== cur.x || p.y !== cur.y) win.setPosition(p.x, p.y)
   win.setAlwaysOnTop(true, 'screen-saver')
   if (!win.isVisible()) win.showInactive()
@@ -656,11 +678,11 @@ async function start() {
   timers.push(setInterval(tickPointer, 40), setInterval(tickRoam, 33), setInterval(tickRecovery, 1000))
   screen.on('display-metrics-changed', () => {
     if (!validWin()) return
-    endDrag(); cancelRoam(); const p = clampWindow(win.getBounds(), movementBody(), areas()); win.setPosition(p.x, p.y); savePos()
+    endDrag(); cancelRoam(); const p = clampWindow(win.getBounds(), windowBox(), areas()); win.setPosition(p.x, p.y); savePos()
   })
   screen.on('display-removed', () => {
     if (!validWin()) return
-    endDrag(); cancelRoam(); const p = clampWindow(win.getBounds(), movementBody(), areas()); win.setPosition(p.x, p.y); savePos()
+    endDrag(); cancelRoam(); const p = clampWindow(win.getBounds(), windowBox(), areas()); win.setPosition(p.x, p.y); savePos()
   })
   // 系统睡眠/唤醒：显示几何、DPI、合成器都可能变，页面快照也可能停更。
   // 不处理的话穿透可能卡在"整窗穿透"，表现就是**她看得见但点不动**，
