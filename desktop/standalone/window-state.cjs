@@ -40,21 +40,39 @@ function savedPosition(bounds, body, areas) {
   const p = { x: bounds.x + body.x, y: bounds.y + body.y }
   const area = areas.find((a) => p.x + body.w / 2 >= a.x && p.x + body.w / 2 <= a.x + a.width
     && p.y + body.h / 2 >= a.y && p.y + body.h / 2 <= a.y + a.height) || areas[0]
-  return { version: 2, bodyX: p.x, bodyY: p.y, workArea: area }
+  // 同时存**窗口位置** wx/wy 与 body 屏幕锚点 bodyX/bodyY：
+  //   · 有 wx/wy 时还原是无损往返（存哪就回哪），不会算出负的窗口 y —— 见 restorePosition 的注释；
+  //   · bodyX/bodyY 继续保留，老存档（没有 wx/wy）仍走原来的换算路径，跨分辨率也能用。
+  return { version: 2, wx: bounds.x, wy: bounds.y, bodyX: p.x, bodyY: p.y, workArea: area }
 }
 function restorePosition(saved, body, areas, fallback) {
   if (Array.isArray(saved) && saved.length === 2 && saved.every(finite)) {
     return clampWindow({ x: saved[0], y: saved[1] }, body, areas)
   }
   if (saved && saved.version === 2 && finite(saved.bodyX) && finite(saved.bodyY)) {
-    let p = { x: saved.bodyX, y: saved.bodyY }
-    const previous = saved.workArea
-    if (previous && previous.width > 0 && previous.height > 0) {
-      const next = areas.find((a) => a.x === previous.x && a.y === previous.y) || areas[0]
-      p.x = next.x + (p.x - previous.x) * next.width / previous.width
-      p.y = next.y + (p.y - previous.y) * next.height / previous.height
+    // ⚠️ 优先用**窗口位置**（version 2 的新字段），别再靠"bodyY − body.y"反推。
+    //
+    // 为什么：只存 body 屏幕锚点时，还原式 `y = bodyY − body.y` **必然可能为负** ——
+    // body.y 在窗口内是 342，所以只要存下来的 bodyY < 342（她当时靠屏幕上方），
+    // 算出来就是负的窗口 y，**头被切掉**。真机事故（2026-10-14）：
+    // pos.json 存 bodyY=148 → 窗口 y = 148 − 342 = **−194**，她头顶出屏、可点区域只剩 2/7。
+    //
+    // 窗口位置是**无损往返**的：存的时候窗口在哪，还原就还在哪（再夹一次即可）。
+    // bodyX/bodyY 仍然保留并参与跨分辨率换算的兼容路径（老存档没有 wx/wy）。
+    let wx = saved.wx
+    let wy = saved.wy
+    if (!finite(wx) || !finite(wy)) {
+      let p = { x: saved.bodyX, y: saved.bodyY }
+      const previous = saved.workArea
+      if (previous && previous.width > 0 && previous.height > 0) {
+        const next = areas.find((a) => a.x === previous.x && a.y === previous.y) || areas[0]
+        p.x = next.x + (p.x - previous.x) * next.width / previous.width
+        p.y = next.y + (p.y - previous.y) * next.height / previous.height
+      }
+      wx = p.x - body.x
+      wy = p.y - body.y
     }
-    return clampWindow({ x: p.x - body.x, y: p.y - body.y }, body, areas)
+    return clampWindow({ x: wx, y: wy }, body, areas)
   }
   return clampWindow(fallback, body, areas)
 }

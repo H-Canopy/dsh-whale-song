@@ -267,9 +267,17 @@ function inputSnapshot(snapshot) {
   geometryUntil = Date.now() + 1500
   if (changed && !drag && validWin()) {
     const current = win.getBounds()
-    const p = first ? restorePosition(readJSON(path.join(app.getPath('userData'), 'pos.json'), null), movementBody(), areas(), current)
-      : clampWindow(current, windowBox(), areas())
-    if (p.x !== current.x || p.y !== current.y) win.setPosition(p.x, p.y)
+    // ⚠️ 这里**必须**用 windowBox()，不能用 movementBody()。
+    // 真机事故（2026-10-14）：原来的 `first` 分支用 movementBody() 从 pos.json 重新还原 ——
+    // 而 `first = !geometry`，几何在启动/唤醒/重载后都会被清空 ⇒ **每次清空后的第一个快照
+    // 都会从磁盘重读一次**，只夹本体时算出负的窗口 y 又写回磁盘，**自己喂自己**，
+    // 于是窗口永远停在 y=-384（实测她只有 3/7 个点可点）。
+    // 两个分支都收敛到 windowBox()，行为才一致。
+    const p = clampWindow(current, windowBox(), areas())
+    if (p.x !== current.x || p.y !== current.y) {
+      bootLog('snapshot reposition: ' + JSON.stringify(current) + ' -> ' + JSON.stringify(p) + ' (first=' + first + ')')
+      win.setPosition(p.x, p.y)
+    }
     savePos()
   }
   if (geometry.roamBlocked || geometry.status !== 'idle') cancelRoam()
@@ -649,9 +657,23 @@ async function start() {
   win.setMenuBarVisibility(false)
   setIgnoreMouse(true)
   const a = screen.getPrimaryDisplay().workArea
-  const initial = restorePosition(readJSON(path.join(app.getPath('userData'), 'pos.json'), null), movementBody(), areas(),
-    { x: a.x + a.width - body.x - body.w - 16, y: a.y + a.height - body.y - body.h - 16 })
-  win.setPosition(initial.x, initial.y)
+  // 用 windowBox()（整窗）而不是 movementBody()：只夹本体时，老存档里 bodyY < body.y
+  // 会算出**负的窗口 y**，她头顶直接出屏 —— 真机事故见 windowBox 的注释。
+  const savedRaw = readJSON(path.join(app.getPath('userData'), 'pos.json'), null)
+  const fallbackPos = { x: a.x + a.width - body.x - body.w - 16, y: a.y + a.height - body.y - body.h - 16 }
+  const box = windowBox()
+  const initial = restorePosition(savedRaw, box, areas(), fallbackPos)
+  // 记录**入参与结果**：这里反复出过"窗口 y 为负、她头顶出屏"的问题，
+  // 而光看结果分不清是"存档本身就负"还是"夹取没生效"，所以两个都记。
+  bootLog('initial position: saved=' + JSON.stringify(savedRaw) + ' box=' + JSON.stringify(box)
+    + ' -> ' + JSON.stringify(initial))
+  // 最后一道兜底：不信任 restorePosition 的结果，**再夹一次**。
+  // 这一步是纯函数、无副作用，多夹一次不可能更差；而它能把任何漏网的负 y 挡在这里。
+  const safe = clampWindow(initial, box, areas())
+  if (safe.x !== initial.x || safe.y !== initial.y) {
+    bootLog('initial position: 二次夹取生效 ' + JSON.stringify(initial) + ' -> ' + JSON.stringify(safe))
+  }
+  win.setPosition(safe.x, safe.y)
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('will-navigate', (event, url) => { if (!url.startsWith(server.petBase + '/dsh-pet/app')) event.preventDefault() })
   win.webContents.on('did-start-loading', () => { rendererLoaded = false; rendererAnnounced = false; frameObserved = false; recovery = null })

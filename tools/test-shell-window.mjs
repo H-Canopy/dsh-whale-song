@@ -50,9 +50,25 @@ test('second monitor with a negative origin remains reachable', () => {
   const result = clampWindow({ x: -900, y: 100 }, body, [{ x: -1920, y: 0, width: 1920, height: 1080 }, ...a])
   assert.equal(result.x, -900)
 })
-test('position round-trip preserves the model anchor after canvas size changes', () => {
+test('保存的是窗口位置，还原时按窗口位置往返（不再靠 body 锚点反推）', () => {
+  // 旧语义是"按新 canvas 的 body 偏移换算 body 锚点"，实测会产生负的窗口 y：
+  //   pos.json 存 bodyY=148、body.y=342 → 窗口 y = 148-342 = -194 ⇒ 她头顶出屏、只能点到 2/7。
+  // 现在存档里带 wx/wy，还原是**无损往返**（再夹一次即可）。
   const saved = savedPosition({ x: 500, y: 300 }, body, a)
-  assert.deepEqual(restorePosition(saved, { ...body, x: 190, y: 360 }, a, { x: 0, y: 0 }), { x: 480, y: 280 })
+  assert.equal(saved.wx, 500, '存档必须包含窗口位置 wx')
+  assert.equal(saved.wy, 300, '存档必须包含窗口位置 wy')
+  // canvas 尺寸变了（body 偏移变），窗口位置仍是 500/300
+  const changed = restorePosition(saved, { ...body, x: 190, y: 360 }, a, { x: 0, y: 0 })
+  assert.equal(changed.x, 500)
+  assert.equal(changed.y, 300)
+})
+test('老存档（只有 body 锚点、没有 wx/wy）也不能还原出负的窗口 y', () => {
+  // 真机事故的原始数据：bodyX=1420 bodyY=148 workArea=1707x1019
+  const legacy = { version: 2, bodyX: 1420, bodyY: 148, workArea: { x: 0, y: 0, width: 1707, height: 1019 } }
+  const box = { x: 8, y: 8, w: 420 - 16, h: 600 - 16 }
+  const p = restorePosition(legacy, box, a, { x: 0, y: 0 })
+  assert(p.y >= 0, `还原出的窗口 y 不能为负（得到 ${p.y}）—— 否则她的头会出屏`)
+  assert(p.x + box.x >= 8 && p.x + box.x + box.w <= a[0].width - 8, '水平也要落在工作区内')
 })
 test('changed resolution and unplugged monitors restore a visible position', () => {
   const saved = savedPosition({ x: 1000, y: 300 }, body, a)
