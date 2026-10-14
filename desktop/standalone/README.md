@@ -13,6 +13,19 @@ npm run desktop:start
 
 启动器自动清除子进程的 `ELECTRON_RUN_AS_NODE`，不会更改用户或系统环境变量。重复启动只唤出已有桌宠，不创建第二只。旧的 `desktop/windows` 入口也转向同一实例。
 
+### 开机自启
+
+用户报过「关机和休眠后必须手动重新启动桌宠」—— 查证当时启动文件夹、`HKCU\...\Run`、计划任务里**都没有**它，项目里也没有任何自启代码。现在两条路都能开：
+
+- **托盘菜单 →「开机自启」**：勾选框读的是**真实注册表值**（不是另存一份设置），改它等于增删同一个 Run 项。
+- 或跑一次 `powershell -ExecutionPolicy Bypass -File tools/register-autostart.ps1`。
+
+实现上**没有**用 `app.setLoginItemSettings`，而是统一走一个 Run 项，值是
+`wscript.exe "<userData>\start-pet-hidden.vbs"`。原因两条，都是踩出来的：
+
+1. `setLoginItemSettings` 会写**另一个** Run 项。两边各写一份 ⇒ **开机会同时启动两只**，两个进程互相抢窗口。
+2. 自启**不能直接指向 electron.exe**：DSH 会话带 `ELECTRON_RUN_AS_NODE=1`，系统环境里也可能残留；一旦存在，Electron 会以 **Node 模式**起来 —— 进程在、桌宠**静默不出现**，最难查。`start-pet.cmd` 先 `set ELECTRON_RUN_AS_NODE=`，`start-pet-hidden.vbs` 再用窗口样式 0 静默拉起，**不闪黑框**。
+
 首次从旧版升级，请刷新一次 DSH 界面，使它读取更新后的前端脚本。桌宠会把自己的存活探测地址写入 `$DSH_HOME/dsh-live2d-pet.json` 的 `desktopEndpoint`，保留原有配置。DSH 页面通过已有的 `/dsh-pet/config` 热读取它，无需新增宿主路由。
 
 桌面角色就绪并连接 DSH 后，DSH 页面暂停自己的模型和事件流，不再显示重复角色。桌宠退出、断连、渲染进程失去响应或崩溃后，页面自动恢复；仅凭一个遗留文件不会一直隐藏角色。正常退出清理自己的探测地址。

@@ -3,6 +3,7 @@
 // Source template. Generated into desktop/standalone/main.js by make-standalone-shell.mjs.
 const { app, BrowserWindow, Tray, Menu, screen, shell, ipcMain, nativeImage, dialog, powerMonitor } = require('electron')
 const fs = require('node:fs')
+const { execFileSync } = require('node:child_process')
 const os = require('node:os')
 const path = require('node:path')
 const crypto = require('node:crypto')
@@ -15,6 +16,9 @@ app.setAppUserModelId('com.hcanopy.dsh.whalesongpet')
 const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
 const CONFIG_FILE = path.join(DSH_HOME, 'dsh-live2d-pet.json')
 const OWNER_PATH = '/dsh-pet/owner/' + crypto.randomUUID()
+// 本应用所在目录（= 生成的 main.js 所在目录）。开机自启要显式把它作为参数传给 Electron，
+// 否则开发态下 Windows 只会启动一个空的 Electron（不带 app 目录）——见 setAutostart。
+const APP_DIR = __dirname
 const WIN_W = 420
 const WIN_H = 600
 let win = null
@@ -333,6 +337,47 @@ async function openDsh() {
   if (state.connected) await shell.openExternal(state.base + '/')
   else await dialog.showMessageBox(win, { type: 'info', title: '连接 DSH', message: '请先打开 DSH。桌宠会自动连接；你仍然可以在桌面上和她互动。' })
 }
+/**
+ * 开机自启的读/写。
+ *
+ * 为什么需要它：用户报「关机和休眠后必须手动重新启动桌宠」——
+ * 查过这台机器：启动文件夹、HKCU Run 键、计划任务里都**没有**这个桌宠，
+ * 项目里也没有任何自启代码，所以每次开机都要手动拉起。
+ *
+ * ⚠️ **不能改用 `app.setLoginItemSettings`**，两个原因：
+ *   ① 它写的是**另一个** Run 项。本仓库已经用「VBS 隐藏包装 + Run 项」注册过自启
+ *      （见 tools/register-autostart.ps1），两边各写一份 ⇒ **开机会同时启动两只**，
+ *      两个进程互相抢窗口。
+ *   ② 开发态（electron.exe 跑目录）下它要显式给全 path/args；而且 `ELECTRON_RUN_AS_NODE`
+ *      一旦残留，Electron 会以 Node 模式起来、桌宠不出现 —— VBS 包装里已经把它清掉了。
+ *
+ * 所以这里统一**读/写同一个 Run 项**，托盘开关只改它的存在与否，绝不引入第二个入口。
+ * 值形如：`wscript.exe "…\start-pet-hidden.vbs"`。
+ */
+const AUTOSTART_NAME = 'DS-WhaleSong-Pet'
+const AUTOSTART_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
+function runReg(args) {
+  try { return execFileSync('reg.exe', args, { encoding: 'utf8', windowsHide: true }) } catch (err) { return '' }
+}
+function autostartEnabled() {
+  return /start-pet-hidden\.vbs/i.test(runReg(['query', AUTOSTART_KEY, '/v', AUTOSTART_NAME]))
+}
+function setAutostart(on) {
+  if (on) {
+    const vbs = path.join(app.getPath('userData'), 'start-pet-hidden.vbs')
+    if (!fs.existsSync(vbs)) {
+      // 环境被动过就说清楚，而不是偷偷另建一个入口造成双启动。
+      bootLog('autostart: 找不到 ' + vbs + ' —— 请先跑 tools/register-autostart.ps1')
+      return false
+    }
+    runReg(['add', AUTOSTART_KEY, '/v', AUTOSTART_NAME, '/t', 'REG_SZ', '/d', 'wscript.exe "' + vbs + '"', '/f'])
+  } else {
+    runReg(['delete', AUTOSTART_KEY, '/v', AUTOSTART_NAME, '/f'])
+  }
+  const now = autostartEnabled()
+  bootLog('autostart ' + (on ? 'on' : 'off') + ' -> effective=' + now)
+  return now === !!on
+}
 function setInputFocus(want, activate = false) {
   if (!validWin() || (want && petHidden) || (!want && composing && !petHidden)) return
   const changed = focusInput !== want
@@ -472,6 +517,9 @@ function syncTrayMenu() {
     { label: '低性能模式', type: 'checkbox', checked: lowPower, click: () => {
       lowPower = !lowPower; updateSettings({ lowPower }); cancelRoam()
       win.webContents.executeJavaScript('window.DSHPet && DSHPet.setLowPower(' + lowPower + ')').catch(() => {}); syncTrayMenu()
+    } },
+    { label: '开机自启', type: 'checkbox', checked: autostartEnabled(), click: (item) => {
+      setAutostart(item.checked); syncTrayMenu()
     } },
     { type: 'separator' },
     { label: '重新载入她', click: reloadPet },
