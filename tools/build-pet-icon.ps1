@@ -13,8 +13,23 @@ $repo = Split-Path -Parent $PSScriptRoot
 $petDir = Join-Path $env:APPDATA 'DS-WhaleSong-Pet'
 New-Item -ItemType Directory -Force -Path $petDir | Out-Null
 
-$src = Join-Path $repo 'assets\model\icon.png'
+# Source must have a REAL alpha channel. Do not use assets/model/icon.png:
+# it is 268x268 fully opaque (A=255 everywhere, dark RGB(33,33,33) corners),
+# i.e. a picture WITH a dark square backdrop - using it produced a black square icon.
+# desktop/icon-source.png (2048x2048, ARGB with transparent regions) is the right one.
+$src = Join-Path $repo 'desktop\icon-source.png'
 if (-not (Test-Path $src)) { throw "icon source not found: $src" }
+$check = New-Object System.Drawing.Bitmap $src
+$sawTransparent = $false
+for ($y = 0; $y -lt $check.Height -and -not $sawTransparent; $y += 16) {
+  for ($x = 0; $x -lt $check.Width; $x += 16) {
+    if ($check.GetPixel($x, $y).A -lt 16) { $sawTransparent = $true; break }
+  }
+}
+$check.Dispose()
+if (-not $sawTransparent) {
+  throw "icon source has no transparent pixels: $src  (it would render as a solid square)"
+}
 $icoPath = Join-Path $petDir 'pet.ico'
 
 # Render the source into the sizes an ICO normally carries.
