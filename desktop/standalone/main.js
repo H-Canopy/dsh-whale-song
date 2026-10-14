@@ -123,7 +123,14 @@ function releaseOwner() {
 }
 function savePos() {
   if (!validWin()) return
-  try { writeJSON(path.join(app.getPath('userData'), 'pos.json'), savedPosition(win.getBounds(), body, areas())) } catch (err) { bootLog('position save: ' + err.message) }
+  try {
+    // 存之前先夹一次：`win.getBounds()` 在"她自己决定位置"的路径上都已经夹过，
+    // 但拖拽路径用的是只夹本体的框，理论上仍可能给出负的窗口 y。
+    // 存档是**跨启动**使用的，写坏一次就会在之后每次启动时复现 —— 所以这里再挡一道
+    // （纯函数、无副作用）。
+    writeJSON(path.join(app.getPath('userData'), 'pos.json'),
+      savedPosition(clampWindow(win.getBounds(), windowBox(), areas()), body, areas()))
+  } catch (err) { bootLog('position save: ' + err.message) }
 }
 /**
  * 切换整窗穿透。
@@ -675,6 +682,18 @@ async function start() {
     bootLog('initial position: 二次夹取生效 ' + JSON.stringify(initial) + ' -> ' + JSON.stringify(safe))
   }
   win.setPosition(safe.x, safe.y)
+  // 抓"谁在移动窗口"：真机事故（2026-10-14）里启动那一刻明明算对了（y=0），
+  // 几秒后她却跑到 y=-348，而所有已知的 setPosition 点都有日志、都没触发 ——
+  // 所以必然是**别的东西**在动它。记录每一次 move 与当时的调用栈，避免再靠猜。
+  win.on('move', () => {
+    if (!validWin()) return
+    const b = win.getBounds()
+    if (b.y < 0) {
+      const stack = new Error().stack || ''
+      const frames = stack.split('\n').slice(1, 6).map((l) => l.trim().replace(/^at\s+/, '')).join(' | ')
+      bootLog('window moved offscreen: y=' + b.y + ' bounds=' + JSON.stringify(b) + ' stack: ' + frames)
+    }
+  })
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('will-navigate', (event, url) => { if (!url.startsWith(server.petBase + '/dsh-pet/app')) event.preventDefault() })
   win.webContents.on('did-start-loading', () => { rendererLoaded = false; rendererAnnounced = false; frameObserved = false; recovery = null })
