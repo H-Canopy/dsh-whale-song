@@ -39,18 +39,69 @@ if (-not $sawTransparent) {
 }
 $icoPath = Join-Path $petDir 'pet.ico'
 
-# Render the source into a square, centred, transparent-backed bitmap of the given size.
-function Render-Square([System.Drawing.Image]$image, [int]$size) {
-  $bmp = New-Object System.Drawing.Bitmap $size, $size, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+# Render the source into a square, transparent-backed bitmap of the given size.
+#
+# Two things matter for how it *looks* in a desktop icon:
+#   1. Padding. The source (desktop/icon-source.png) has her nearly filling the square
+#      (alpha map: only a strip on the left is transparent; content runs to the edges).
+#      Drawn at 100% she looked cramped, and the shortcut's overlay arrow badge covered
+#      part of her face. So she is scaled down to ~82% and centred.
+#   2. Centring on the CONTENT, not the canvas. Her opaque area sits slightly right of
+#      the canvas centre, so scaling the canvas alone kept her off-centre.
+$PAD_RATIO = 0.82
+
+function Get-OpaqueBounds([System.Drawing.Image]$image) {
+  # NOTE: there is no `new Bitmap(Image)` constructor available here, and GetPixel needs a
+  # Bitmap (not an Image), so draw the source into an explicit 32bpp copy first.
+  $w = [int]$image.Width; $h = [int]$image.Height
+  $bmp = [System.Drawing.Bitmap]::new($w, $h, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.DrawImage($image, 0, 0, $w, $h)
+  $g.Dispose()
+  $minX = $w; $maxX = -1; $minY = $h; $maxY = -1
+  $step = [Math]::Max(1, [int]($w / 256))     # coarse scan is enough for centring
+  for ($y = 0; $y -lt $h; $y += $step) {
+    for ($x = 0; $x -lt $w; $x += $step) {
+      if ($bmp.GetPixel($x, $y).A -gt 200) {
+        if ($x -lt $minX) { $minX = $x }
+        if ($x -gt $maxX) { $maxX = $x }
+        if ($y -lt $minY) { $minY = $y }
+        if ($y -gt $maxY) { $maxY = $y }
+      }
+    }
+  }
+  $bmp.Dispose()
+  if ($maxX -lt 0) { return @{ X = 0; Y = 0; W = $w; H = $h } }
+  return @{ X = $minX; Y = $minY; W = ($maxX - $minX + 1); H = ($maxY - $minY + 1) }
+}
+
+# Load the source BEFORE measuring it - Get-OpaqueBounds needs a real Image, and calling
+# it with $null produced "Parameter is not valid" from the Bitmap constructor (the
+# dimensions came out as 0).
+$image = [System.Drawing.Image]::FromFile($src)
+
+$bounds = Get-OpaqueBounds $image
+Write-Output ("content bounds: x " + $bounds.X + ".." + ($bounds.X + $bounds.W - 1) +
+  "  y " + $bounds.Y + ".." + ($bounds.Y + $bounds.H - 1) +
+  "  (" + $bounds.W + "x" + $bounds.H + " of " + $image.Width + "x" + $image.Height + ")")
+
+function Render-Square([System.Drawing.Image]$image, [int]$size, $bounds) {
+  $bmp = [System.Drawing.Bitmap]::new([int]$size, [int]$size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
   $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
   $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
   $g.Clear([System.Drawing.Color]::Transparent)
-  $ratio = [Math]::Min($size / $image.Width, $size / $image.Height)
-  $w = [int]($image.Width * $ratio)
-  $h = [int]($image.Height * $ratio)
-  $g.DrawImage($image, [int](($size - $w) / 2), [int](($size - $h) / 2), $w, $h)
+  # Fit the CONTENT (not the canvas) into the padded box, preserving aspect ratio.
+  $box = $size * $PAD_RATIO
+  $ratio = [Math]::Min($box / $bounds.W, $box / $bounds.H)
+  $w = [int]($bounds.W * $ratio)
+  $h = [int]($bounds.H * $ratio)
+  $dstX = [int](($size - $w) / 2)
+  $dstY = [int](($size - $h) / 2)
+  $srcRect = New-Object System.Drawing.Rectangle $bounds.X, $bounds.Y, $bounds.W, $bounds.H
+  $dstRect = New-Object System.Drawing.Rectangle $dstX, $dstY, $w, $h
+  $g.DrawImage($image, $dstRect, $srcRect, [System.Drawing.GraphicsUnit]::Pixel)
   $g.Dispose()
   return $bmp
 }
@@ -100,15 +151,15 @@ function To-Dib([System.Drawing.Bitmap]$bmp) {
   return ,$bytes
 }
 
-$image = [System.Drawing.Image]::FromFile($src)
+# ($image was already loaded above, before Get-OpaqueBounds - do not reload it here.)
 $entries = @()
 foreach ($size in @(16, 32, 48, 64)) {
-  $bmp = Render-Square $image $size
+  $bmp = Render-Square $image $size $bounds
   $entries += ,@{ Size = $size; Bytes = (To-Dib $bmp); IsPng = $false }
   $bmp.Dispose()
 }
 # 256 stays PNG: that is the one size Windows expects as PNG.
-$big = Render-Square $image 256
+$big = Render-Square $image 256 $bounds
 $ms = New-Object System.IO.MemoryStream
 $big.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
 $entries += ,@{ Size = 256; Bytes = $ms.ToArray(); IsPng = $true }
