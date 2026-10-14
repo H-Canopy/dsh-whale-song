@@ -77,7 +77,27 @@ $source = $source.Replace('__APPDIR_Q__', ('"\"' + $appDir.Replace('\', '\\') + 
 $source = $source.Replace('__REPO__', (CsStr $repo))
 
 Write-Output "compiling -> $exePath"
-Add-Type -TypeDefinition $source -Language CSharp -OutputAssembly $exePath -OutputType WindowsApplication
+# Embed the pet icon into the exe itself, so the file carries it wherever it is copied.
+# The .ico is produced by tools/build-pet-icon.ps1.
+$ico = Join-Path $petDir 'pet.ico'
+if (Test-Path $ico) {
+  $cp = New-Object System.CodeDom.Compiler.CompilerParameters
+  $cp.OutputAssembly = $exePath
+  $cp.GenerateExecutable = $true
+  $cp.GenerateInMemory = $false
+  $cp.CompilerOptions = '/target:winexe /win32icon:"' + $ico + '"'
+  $cp.ReferencedAssemblies.Add('System.dll') | Out-Null
+  $provider = New-Object Microsoft.CSharp.CSharpCodeProvider
+  $result = $provider.CompileAssemblyFromSource($cp, $source)
+  if ($result.Errors.HasErrors) {
+    foreach ($e in $result.Errors) { Write-Output ("  compile error: " + $e) }
+    throw "compile failed"
+  }
+  Write-Output "  icon embedded: $ico"
+} else {
+  Write-Output "  (pet.ico not found - run tools/build-pet-icon.ps1 for an embedded icon)"
+  Add-Type -TypeDefinition $source -Language CSharp -OutputAssembly $exePath -OutputType WindowsApplication
+}
 Write-Output ("built: " + $exePath + "  (" + (Get-Item $exePath).Length + " bytes)")
 
 $desktop = [Environment]::GetFolderPath('Desktop')
@@ -87,6 +107,6 @@ $s = $ws.CreateShortcut($lnk)
 $s.TargetPath = $exePath
 $s.WorkingDirectory = $repo
 $s.Description = 'Restart the DS Whale Song desktop pet'
-$s.IconLocation = "$repo\desktop\windows\build\icon.png"
+$s.IconLocation = "$exePath,0"   # exe 自带嵌入图标，不要指向 .png（Windows 不认 png 当图标）
 $s.Save()
 Write-Output ("shortcut -> " + $lnk)
