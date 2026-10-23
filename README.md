@@ -6,7 +6,7 @@
 
 <p><b>住在你桌面上的鲸。</b><br/>桌面伙伴 · DSH 联动 · 音乐控制<br/><sub>A Live2D desktop companion for the DeepSeek Harness Web UI.</sub></p>
 
-[![Download](https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD%E6%9C%80%E6%96%B0%E7%89%88-2563eb?style=for-the-badge&logo=github&logoColor=white)](../../releases/latest)
+[![Install](https://img.shields.io/badge/%E5%AE%89%E8%A3%85%E8%AF%B4%E6%98%8E-2563eb?style=for-the-badge&logo=github&logoColor=white)](docs/安装说明.md)
 
 [![License](https://img.shields.io/badge/license-MIT-2563eb.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/H-Canopy/dsh-whale-song?color=2563eb&label=release)](../../releases)
@@ -31,6 +31,8 @@
 
 ## 下载与安装
 
+> 本仓库**不发安装包**（正式资产不公开，打包会连她一起打进去）。装法见 **[docs/安装说明.md](docs/安装说明.md)**。
+
 **一、装进 DSH**（Web 界面右下角那一位）
 
 ```bash
@@ -51,7 +53,7 @@ npm install
 npm run preview
 ```
 
-> 上面三种方式装出来都是公开示例（通用鲸鱼）。完整功能说明见 **[docs/功能.md](docs/功能.md)**。
+> 装出来是公开示例（通用鲸鱼），功能一个不少。手动装、自己打包、常见问题，都在 **[docs/安装说明.md](docs/安装说明.md)**；完整功能见 **[docs/功能.md](docs/功能.md)**。
 
 ## 她能做什么
 
