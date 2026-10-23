@@ -6,9 +6,11 @@
 
 <p><b>住在你桌面上的鲸。</b><br/>桌面伙伴 · DSH 联动 · 音乐控制<br/><sub>A Live2D desktop companion for the DeepSeek Harness Web UI.</sub></p>
 
+[![Download](https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD%E6%9C%80%E6%96%B0%E7%89%88-2563eb?style=for-the-badge&logo=github&logoColor=white)](../../releases/latest)
+
 [![License](https://img.shields.io/badge/license-MIT-2563eb.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/H-Canopy/dsh-whale-song?color=2563eb&label=release)](../../releases)
-[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0ea5e9.svg)](#快速开始)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0ea5e9.svg)](#下载与安装)
 [![Electron](https://img.shields.io/badge/electron-33-47848f.svg)](package.json)
 [![Assets](https://img.shields.io/badge/%E8%A7%92%E8%89%B2%E8%B5%84%E4%BA%A7-%E4%B8%8D%E9%9A%8F%E4%BB%93%E5%BA%93%E6%8F%90%E4%BE%9B-f59e0b.svg)](ASSET_POLICY.md)
 
@@ -26,7 +28,8 @@
 | **DSH 联动** | 对话、任务状态、钱包余额实时反映在她身上；点她一下就能直接跟 agent 说话。 |
 | **音乐控制** | 本地音乐 / 在线电台（Radio Browser · SomaFM）/ 网易云联动；右键双击播放暂停，优先走系统媒体会话（SMTC）。 |
 | **可开发** | 50+ 个测试与诊断脚本、行为断言闸门、资产边界审计（CI 每次提交都跑）。 |
-## 快速开始
+
+## 下载与安装
 
 **一、装进 DSH**（Web 界面右下角那一位）
 
@@ -47,6 +50,8 @@ npm run desktop:start
 npm install
 npm run preview
 ```
+
+> 上面三种方式装出来都是公开示例（通用鲸鱼）。完整功能说明见 **[docs/功能.md](docs/功能.md)**。
 
 ## 她能做什么
 
