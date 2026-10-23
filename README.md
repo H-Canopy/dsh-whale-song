@@ -4,7 +4,7 @@
 
 <h1>鲸歌 · WhaleSong</h1>
 
-<p><b>住在你桌面上的鲸。</b><br/>桌面伙伴 · DSH 联动 · 音乐控制</p>
+<p><b>住在你桌面上的鲸。</b><br/>桌面伙伴 · DSH 联动 · 音乐控制<br/><sub>A Live2D desktop companion for the DeepSeek Harness Web UI.</sub></p>
 
 [![License](https://img.shields.io/badge/license-MIT-2563eb.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/H-Canopy/dsh-whale-song?color=2563eb&label=release)](../../releases)
@@ -20,13 +20,12 @@
 
 ## 特性
 
-| | 能力 | 说明 |
-| :--: | --- | --- |
-| 🪟 | **脱离 DSH 独立运行** | 自带 Electron 桌面壳（Windows）：透明窗口、置顶、穿透、拖动、收起、150–280 缩放、低功耗。DSH 没开，她也在。 |
-| 🔗 | **DSH 联动** | 对话、任务状态、钱包余额实时反映在她身上；点她一下就能直接跟 agent 说话。 |
-| 🎵 | **音乐控制** | 本地音乐 / 在线电台（Radio Browser · SomaFM）/ 网易云联动；右键双击播放暂停，优先走系统媒体会话（SMTC）。 |
-| 🧩 | **可开发** | 50+ 个测试与诊断脚本、行为断言闸门、资产边界审计（CI 每次提交都跑）。 |
-
+| 能力 | 说明 |
+| --- | --- |
+| **脱离 DSH 独立运行** | 自带 Electron 桌面壳（Windows）：透明窗口、置顶、穿透、拖动、收起、150–280 缩放、低功耗。DSH 没开，她也在。 |
+| **DSH 联动** | 对话、任务状态、钱包余额实时反映在她身上；点她一下就能直接跟 agent 说话。 |
+| **音乐控制** | 本地音乐 / 在线电台（Radio Browser · SomaFM）/ 网易云联动；右键双击播放暂停，优先走系统媒体会话（SMTC）。 |
+| **可开发** | 50+ 个测试与诊断脚本、行为断言闸门、资产边界审计（CI 每次提交都跑）。 |
 ## 快速开始
 
 **一、装进 DSH**（Web 界面右下角那一位）
