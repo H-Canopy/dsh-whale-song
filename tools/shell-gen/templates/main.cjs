@@ -10,7 +10,9 @@ const { startPetServer, resolveRepoRoot } = require('./server.cjs')
 const { createDshLink } = require('./dsh-link.cjs')
 const { DEFAULT_BODY, clampWindow, beginDrag, advanceDrag, savedPosition, restorePosition } = require('./window-state.cjs')
 
-app.setName('DS-WhaleSong-Pet')
+const SONGM_PREVIEW = process.env.WHALESONG_PREVIEW !== '0'
+app.setName(SONGM_PREVIEW ? 'WhaleSong-Next-Preview' : 'DS-WhaleSong-Pet')
+if (SONGM_PREVIEW) app.setPath('userData', path.join(app.getPath('appData'), 'WhaleSong-Next-Preview'))
 app.setAppUserModelId('com.hcanopy.dsh.whalesongpet')
 const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
 const CONFIG_FILE = path.join(DSH_HOME, 'dsh-live2d-pet.json')
@@ -36,7 +38,8 @@ let petHidden = false
 let rendererReady = false
 let lowPower = false
 let roam = null
-let nextRoamAt = Date.now() + 25000
+let nextRoamAt = Date.now() + 90000
+let roamSequence = 0
 let pointer = null
 let geometryUntil = 0
 let suspended = false
@@ -60,7 +63,12 @@ const readJSON = (file, fallback = {}) => {
 const writeJSON = (file, value) => {
   fs.mkdirSync(path.dirname(file), { recursive: true })
   fs.writeFileSync(file + '.tmp', JSON.stringify(value, null, 2) + '\n', 'utf8')
-  fs.renameSync(file + '.tmp', file)
+  try { fs.renameSync(file + '.tmp', file) } catch (error) {
+    if (error.code !== 'EXDEV') throw error
+    // Some encrypted Windows profiles reject even a same-directory rename.
+    fs.copyFileSync(file + '.tmp', file)
+    fs.unlinkSync(file + '.tmp')
+  }
 }
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json')
 const settings = () => {
@@ -105,12 +113,14 @@ function bootLog(message) {
   } catch {}
 }
 function claimOwner() {
+  if (SONGM_PREVIEW) return
   const config = readJSON(CONFIG_FILE)
   priorOwnerEndpoint = config.desktopEndpoint
   ownerEndpoint = server.petBase + OWNER_PATH
   writeJSON(CONFIG_FILE, { ...config, desktopEndpoint: ownerEndpoint })
 }
 function releaseOwner() {
+  if (SONGM_PREVIEW) return
   const config = readJSON(CONFIG_FILE)
   if (config.desktopEndpoint !== ownerEndpoint) return
   // A previous crashed shell's endpoint is intentionally not restored.
@@ -219,7 +229,16 @@ function hitKindSticky(x, y, keepInteractive) {
   }
   return 'none'
 }
-function cancelRoam(delay = 20000) { roam = null; nextRoamAt = Date.now() + delay }
+function notifyRoam(dir, details = {}) { if (validWin() && rendererReady) win.webContents.send('pet-roam', { dir, ...details }) }
+function cancelRoam(delay = 20000) { const previous=roam;roam=null;if(previous)notifyRoam(0, { cancelled: true, id: previous.id });nextRoamAt = Date.now() + delay }
+function roamPhase(data) {
+  if (!roam || !data || data.id !== roam.id || roam.phase !== 'preparing') return
+  if (data.phase === 'failed') { cancelRoam(); return }
+  if (data.phase !== 'moving' || !Number.isFinite(data.cycle) || data.cycle < .25 || data.cycle > 3) return
+  const distance=Math.abs(roam.target.x-roam.from.x),cycle=data.cycle*1000
+  const cycles=Math.max(2,Math.ceil(distance/Math.max(40,body.h*.42)/data.cycle))
+  roam.phase='moving';roam.start=Date.now();roam.duration=cycles*cycle
+}
 function inputSnapshot(snapshot) {
   if (suspended || !snapshot || (recovery && snapshot.recoveryId !== recovery.id)) return
   const frameFresh = !Number.isFinite(snapshot.renderAge) || snapshot.renderAge < 3000
@@ -346,27 +365,29 @@ function endDrag(delta) {
 }
 function tickRoam() {
   if (!validWin() || suspended || recovery || petHidden || !win.isVisible() || !rendererReady || Date.now() > geometryUntil || lowPower
-    || !settings().roaming || drag || focusInput || !geometry || geometry.roamBlocked || geometry.status !== 'idle') return
+    || !settings().roaming || drag || focusInput || !geometry || geometry.roamBlocked || geometry.status !== 'idle') { if (roam) cancelRoam(); return }
   const now = Date.now()
   if (!roam) {
     if (now < nextRoamAt) return
     const bounds = win.getBounds()
     const display = screen.getDisplayNearestPoint({ x: Math.round(bounds.x + body.x + body.w / 2), y: Math.round(bounds.y + body.y + body.h / 2) }).workArea
-    const target = clampWindow({
-      x: display.x + 12 + Math.random() * Math.max(0, display.width - body.w - 24) - body.x,
-      y: display.y + 12 + Math.random() * Math.max(0, display.height - body.h - 24) - body.y,
-    }, windowBox(), [display])
-    const distance = Math.hypot(target.x - bounds.x, target.y - bounds.y)
-    roam = { from: bounds, target, start: now, duration: Math.max(2000, distance / 55 * 1000) }
+    const direction = Math.random() < .5 ? -1 : 1
+    const stride = Math.min(220, Math.max(110, body.w * .8))
+    let target = clampWindow({ x: bounds.x + direction * stride, y: bounds.y }, windowBox(), [display])
+    if (Math.abs(target.x - bounds.x) < 24) target = clampWindow({ x: bounds.x - direction * stride, y: bounds.y }, windowBox(), [display])
+    const distance = Math.abs(target.x - bounds.x)
+    if (distance < 24) { nextRoamAt = now + 45000; return }
+    roam = { id: ++roamSequence,phase:'preparing',from: bounds, target, requested:now,start:null,duration:0 }
+    notifyRoam(target.x >= bounds.x ? 1 : -1,{id:roam.id})
   }
-  const t = Math.min(1, (now - roam.start) / roam.duration)
-  const smooth = t * t * (3 - 2 * t)
-  const next = clampWindow({ x: roam.from.x + (roam.target.x - roam.from.x) * smooth,
-    y: roam.from.y + (roam.target.y - roam.from.y) * smooth }, windowBox(), areas())
+  if(roam.phase==='preparing'){if(now-roam.requested>12000)cancelRoam();return}
+  const t = Math.max(0, Math.min(1, (now - roam.start) / roam.duration))
+  const next = clampWindow({ x: roam.from.x + (roam.target.x - roam.from.x) * t, y: roam.from.y }, windowBox(), areas())
   const b = win.getBounds()
   if (next.x !== b.x || next.y !== b.y) win.setBounds({ ...next, width: roam.from.width, height: roam.from.height })
-  if (t === 1) { savePos(); cancelRoam(20000 + Math.random() * 25000) }
+  if (t === 1) { const id=roam.id;roam = null;notifyRoam(0, { cancelled: false,id });savePos();nextRoamAt = now + 4500 + 60000 + Math.random() * 30000 }
 }
+
 async function openDsh() {
   await link.refresh()
   const state = link.status()
@@ -399,6 +420,7 @@ function autostartEnabled() {
   return /start-pet-hidden\.vbs/i.test(runReg(['query', AUTOSTART_KEY, '/v', AUTOSTART_NAME]))
 }
 function setAutostart(on) {
+  if (SONGM_PREVIEW) return false
   if (on) {
     const vbs = path.join(app.getPath('userData'), 'start-pet-hidden.vbs')
     if (!fs.existsSync(vbs)) {
@@ -590,6 +612,7 @@ function registerIPC() {
       + ' hit=' + hitKind(point.x, point.y) + ' ignore=' + lastIgnore)
   })
   ipcMain.on('pet-input', (event, data) => { if (trusted(event)) inputSnapshot(data) })
+  ipcMain.on('pet-roam-phase', (event, data) => { if (trusted(event)) roamPhase(data) })
   ipcMain.on('pet-ready', (event, state) => {
     if (!trusted(event) || rendererAnnounced || !state || typeof state.collapsed !== 'boolean') return
     rendererAnnounced = true
@@ -657,7 +680,7 @@ async function start() {
       && (petHidden || suspended || geometryFresh()) })
   win = new BrowserWindow({
     width: WIN_W, height: WIN_H, frame: false, transparent: true, resizable: false,
-    hasShadow: false, skipTaskbar: true, focusable: false, show: false, title: 'DS 鲸鱼娘桌宠',
+    hasShadow: false, skipTaskbar: true, focusable: false, show: false, title: '鲸歌 · 新版预览',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false },
   })
   win.setAlwaysOnTop(true, 'screen-saver')
@@ -734,7 +757,7 @@ async function start() {
     powerMonitor.on('resume', () => onPowerResume('resume'))
     powerMonitor.on('unlock-screen', () => onPowerResume('unlock'))
   } catch (err) { bootLog('powerMonitor 不可用: ' + (err && err.message)) }
-  await win.loadURL(server.petBase + '/dsh-pet/app')
+  await win.loadURL(server.petBase + '/dsh-pet/app' + (SONGM_PREVIEW ? '?preview=1' : ''))
   bootLog('started: ' + server.petBase + ' DSH=' + (link.status().base || 'offline'))
 }
 app.on('before-quit', () => {

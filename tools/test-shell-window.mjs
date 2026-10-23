@@ -88,7 +88,7 @@ let cursor = { x: 0, y: 0 }
 let now = Date.now()
 const fakeDate = class extends Date { static now() { return now } }
 const app = {
-  setName() {}, setAppUserModelId() {}, getPath: () => userData,
+  setName() {}, setPath() {}, setAppUserModelId() {}, getPath: () => userData,
   on: (name, fn) => events.set(name, fn), whenReady: async () => {}, requestSingleInstanceLock: () => true,
   quit: () => { nativeCalls.push(['quit']) },
 }
@@ -156,7 +156,7 @@ const fakeRequire = (name) => {
 }
 try {
   vm.runInNewContext(fs.readFileSync(path.join(SHELL, 'main.js'), 'utf8'), {
-    require: fakeRequire, __dirname: SHELL, process: { env: { DSH_HOME: home } }, Date: fakeDate,
+    require: fakeRequire, __dirname: SHELL, process: { env: { DSH_HOME: home, WHALESONG_PREVIEW: '0' } }, Date: fakeDate,
     console, setTimeout, clearTimeout, setInterval: (fn, ms) => { intervals.push({ fn, ms }); return intervals.length }, clearInterval() {},
   })
   await new Promise((resolve) => setTimeout(resolve, 25))
@@ -329,10 +329,20 @@ try {
   })
   test('idle roaming moves, and work/panels/hidden state stop movement', () => {
     cursor = { x: 0, y: 0 }; tickPointer()
-    now += 40000; snapshot(); tickRoam()
+    now += 100000; snapshot(); tickRoam()
     const before = win.getBounds()
     now += 1000; snapshot(); tickRoam()
+    assert.deepEqual(win.getBounds(), before, 'window waits for renderer acknowledgement')
+    assert(nativeCalls.some(c => c[0] === 'send' && c[1] === 'pet-roam' && c[2].dir), 'run-in receives direction')
+    const message=nativeCalls.filter(c=>c[0]==='send'&&c[1]==='pet-roam'&&c[2].dir).at(-1)[2]
+    ipc.get('pet-roam-phase')({sender:{}},{id:message.id,phase:'moving',cycle:.75})
+    now += 1000;snapshot();tickRoam();assert.deepEqual(win.getBounds(),before,'foreign renderer cannot start movement')
+    ipc.get('pet-roam-phase')(sender,{id:message.id+1,phase:'moving',cycle:.75})
+    now += 1000;snapshot();tickRoam();assert.deepEqual(win.getBounds(),before,'stale phase cannot start movement')
+    ipc.get('pet-roam-phase')(sender,{id:message.id,phase:'moving',cycle:.75})
+    now += 500; snapshot(); tickRoam()
     assert.notDeepEqual(win.getBounds(), before)
+    assert.equal(win.getBounds().y, before.y, 'horizontal running retains the ground line')
     snapshot([], 'thinking'); const working = win.getBounds(); now += 1000; tickRoam()
     assert.deepEqual(win.getBounds(), working)
     snapshot([{ x: 10, y: 10, w: 100, h: 100 }]); now += 30000; tickRoam()

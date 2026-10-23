@@ -102,6 +102,7 @@
       title: String((row && row.title) || ''),
       artist: String((row && row.artist) || ''),
       status: st,
+      backend: row && row.backend || 'smtc',
       playing: st === 'Playing',
     }
   }

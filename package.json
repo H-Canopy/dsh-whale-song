@@ -1,37 +1,34 @@
 {
   "name": "dsh-whale-song",
-  "version": "0.5.0",
-  "description": "鲸歌（dsh-whale-song）：上游 dsh-whale-girl-live2d 的增强版 fork —— Live2D 鲸鱼娘桌宠（跟着 agent 状态换表情动作）+ 我们额外接入的本地音乐 / 在线电台 / 网易云联动。点一下跟她说话，右键菜单换表情·换装·摆场景·演动作，还能让她给你放歌。（Whale Girl Pet + music: a Live2D companion for the DeepSeek Harness Web UI. Model assets are non-commercial, CC BY-NC-SA 4.0.）",
+  "version": "0.6.3",
+  "description": "鲸歌桌面伙伴：程序代码开放，正式角色资产不随仓库提供",
   "keywords": [
-    "dsh",
-    "dsh-plugin",
-    "deepseek-harness",
-    "live2d",
-    "cubism",
     "desktop-pet",
-    "桌宠",
-    "鲸鱼娘",
-    "whale-girl"
+    "whalesong",
+    "dsh",
+    "桌宠"
   ],
   "type": "module",
   "main": "lib/index.js",
   "files": [
     "lib",
-    "assets",
-    "docs",
-    "skill",
-    "sources",
     "desktop/standalone",
-    "desktop/windows/build",
+    "standalone",
+    "sources",
+    "skill",
     "tools",
-    "cordis.patch.yml",
-    "README.md",
-    "CHANGELOG.md",
-    "AUTHORS.md",
-    "PROVENANCE.md",
+    "LICENSE",
     "NOTICE.md",
-    "PLAN-OURS.md",
-    "LICENSE"
+    "ASSET_POLICY.md",
+    "assets/desktop-renderer.js",
+    "assets/media-bridge.js",
+    "assets/media-local.js",
+    "assets/media-smtc.js",
+    "assets/pet.js",
+    "assets/songm-renderer-old.js",
+    "assets/songm-renderer.js",
+    "assets/demo-whale.svg",
+    "assets/vendor"
   ],
   "bin": {
     "dsh-pet": "tools/pet-ctl.mjs"
@@ -49,7 +46,7 @@
     "test:shell": "node tools/test-shell-window.mjs",
     "standalone": "node tools/serve-standalone.mjs",
     "desktop:install": "pnpm install",
-    "desktop:start": "node tools/start-desktop.mjs",
+    "desktop:start": "node tools/start-next.mjs",
     "desktop:generate": "node tools/shell-gen/make-shell-cjs-server.mjs && node tools/shell-gen/make-standalone-shell.mjs",
     "desktop:dist": "electron-builder --win --x64 --publish never",
     "smoke": "node tools/smoke.mjs",
@@ -108,5 +105,6 @@
   "devDependencies": {
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8"
-  }
+  },
+  "private": true
 }

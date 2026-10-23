@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 // 从 lib/media-bridge.mjs 生成 desktop/standalone/media-bridge.cjs（CommonJS 版，给壳用）。
 // 为什么：Electron 33 的 ESM 加载器处理内置模块 electron 时会崩
 //（cjsPreparseModuleExports: Cannot read properties of undefined），所以壳必须走 CommonJS。
@@ -26,7 +27,7 @@ import fs from 'node:fs'
 
 const SRC = path.join(REPO, 'lib', 'media-bridge.mjs')
 const OUT = path.join(REPO, 'desktop', 'standalone', 'media-bridge.cjs')
-let s = fs.readFileSync(SRC, 'utf8')
+let s = fs.readFileSync(SRC, 'utf8').replace(/\r\n/g, '\n')
 
 const before = s
 s = s.replace(

@@ -141,23 +141,14 @@ try {
   // （日志采集对 XHR/异步时序不可靠：模型加载晚于 Network.enable，实测漏记过。
   //   直接请求是确定的证据，而且只花几毫秒。）
   const assetBase = 'http://127.0.0.1:' + PORT + '/assets/'
-  const mustExist = [
-    'vendor/live2dcubismcore.min.js',
-    'vendor/pixi.min.js',
-    'vendor/cubism4.min.js',
-    'model/manifest.json',
-    'model/c_0120.model3.json',
-    'model/c_0120.moc3',
-    'model/c_0120.2048/texture_00.png',
-    'model/expressions/爱心眼.exp3.json',
-  ]
+  const mustExist = ['vendor/pixi.min.js', 'songm-renderer.js', 'demo-whale.svg']
   for (const rel of mustExist) {
     let status = 0
     try { const r = await fetch(assetBase + encodeURI(rel)); status = r.status } catch (err) { status = -1 }
     if (status !== 200) ok(false, '静态资源在位：' + rel, 'status=' + status)
   }
   ok(mustExist.length > 0, '静态资源逐个核对完了（' + mustExist.length + ' 个：运行时 / 清单 / 模型本体 / 贴图 / 表情）', '')
-  const missing = httpLog.filter((r) => /\/assets\//.test(r.url) && r.status >= 400)
+  const missing = httpLog.filter((r) => /\/assets\//.test(r.url) && r.status >= 400 && !/\/songm\//.test(r.url))
   ok(missing.length === 0, '页面自己请求过的静态资源也没有 404/500', JSON.stringify(missing.slice(0, 3)))
 
   // 宿主接口确实拿不到 —— 直接问页面（SSE 连接失败不会有 responseReceived 事件，
@@ -208,7 +199,7 @@ try {
   })()`)
   console.log('  她的现场：' + JSON.stringify(alive))
   ok(!!alive && typeof alive.status === 'string' && alive.status.length > 0, '状态行正常："' + (alive && alive.status) + '"', '')
-  ok(!!alive && alive.actions >= 8, '一次性动作有 ' + (alive && alive.actions) + ' 个可用（模型清单读到了）', JSON.stringify(alive))
+  ok(!!alive && alive.actions === 2, '公开示例只展示2个通用动作，不假装提供私有视频', JSON.stringify(alive))
 
   const drawn2 = await sampleCanvas()
 
@@ -228,7 +219,7 @@ try {
 
   // 静态页上的"搭配 DSH 才完整"说明必须在（这是产品要求的一部分）
   const copy = await ev('document.body.innerText')
-  ok(/搭配|完整版/.test(String(copy)) && /dsh plugin/.test(String(copy)),
+  ok(/完整版/.test(String(copy)) && /npm run desktop:start/.test(String(copy)),
     '页面明说了"搭配 DSH 才是完整版"，并给出安装命令', String(copy).slice(0, 120).replace(/\n/g, ' '))
 
   // 截图留证

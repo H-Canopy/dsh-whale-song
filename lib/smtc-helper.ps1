@@ -1,4 +1,4 @@
-# smtc-helper.ps1 -- one-shot Windows SMTC (media session) bridge for the whale-song pet
+﻿# smtc-helper.ps1 -- one-shot Windows SMTC (media session) bridge for the whale-song pet
 # host (lib/index.js). Originally written for the NetEase-only backend of
 # dsh-whale-widget; now the host-side "unified layer": ANY player that publishes a media
 # session (NetEase / QQ Music / Kugou / Spotify / foobar2000 / PotPlayer / VLC / browsers)
@@ -41,7 +41,7 @@
 
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet('get', 'play', 'pause', 'next', 'prev')]
+  [ValidateSet('get', 'play', 'pause', 'next', 'prev', 'toggle')]
   [string]$Cmd,
 
   # Session filter (regex, case-insensitive). Empty = keep the original NetEase-only default
@@ -83,6 +83,54 @@ function Write-Failure([string]$Reason) {
 }
 function Write-Diag([string]$Message) {
   try { [Console]::Error.WriteLine('[smtc] ' + $Message) } catch { }
+}
+
+# Targeted fallback for NetEase builds which do not publish an SMTC session.
+function Get-NetEaseWindow {
+  if ($App -and ('cloudmusic.exe' -notmatch $App)) { return $null }
+  $p = Get-Process cloudmusic -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+  if (-not $p) { return $null }
+  return @{ appId='cloudmusic.exe'; title=[string]$p.MainWindowTitle; artist=''; status='Unknown'; backend='window'; handle=$p.MainWindowHandle }
+}
+function Invoke-NetEaseWindow($row) {
+  Add-Type -TypeDefinition @"
+using System; using System.Runtime.InteropServices;
+public class WhaleSongWindowCommand {
+ [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+ [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+ [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+ [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h,IntPtr pid);
+ [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a,uint b,bool on);
+ [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+ [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int cmd);
+ [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int k);
+ [DllImport("user32.dll")] public static extern void keybd_event(byte k,byte scan,uint flags,UIntPtr extra);
+ [DllImport("user32.dll",SetLastError=true)] public static extern IntPtr SendMessageTimeout(IntPtr h,uint msg,IntPtr wp,IntPtr lp,uint flags,uint timeout,out UIntPtr result);
+}
+"@
+  $commands=@{toggle=14;play=46;pause=47;next=11;prev=12}
+  [UIntPtr]$result=[UIntPtr]::Zero
+  $sent=[WhaleSongWindowCommand]::SendMessageTimeout([IntPtr]$row.handle,0x319,[IntPtr]$row.handle,[IntPtr]($commands[$Cmd] -shl 16),2,1500,[ref]$result)
+  if ($sent -eq [IntPtr]::Zero -or $result.ToUInt64() -eq 0) {
+    if($Cmd -ne 'toggle'){Write-Failure 'control-failed';return}
+    foreach($key in @(16,17,18)){if(([WhaleSongWindowCommand]::GetAsyncKeyState($key) -band 0x8000) -ne 0){Write-Failure 'control-failed';return}}
+    $previous=[WhaleSongWindowCommand]::GetForegroundWindow();$minimized=[WhaleSongWindowCommand]::IsIconic([IntPtr]$row.handle)
+    try {
+      if($minimized){[WhaleSongWindowCommand]::ShowWindow([IntPtr]$row.handle,9)|Out-Null}
+      $thread=[WhaleSongWindowCommand]::GetCurrentThreadId();$foregroundThread=[WhaleSongWindowCommand]::GetWindowThreadProcessId($previous,[IntPtr]::Zero)
+      $attached=[WhaleSongWindowCommand]::AttachThreadInput($thread,$foregroundThread,$true)
+      try{[WhaleSongWindowCommand]::SetForegroundWindow([IntPtr]$row.handle)|Out-Null}finally{if($attached){[WhaleSongWindowCommand]::AttachThreadInput($thread,$foregroundThread,$false)|Out-Null}}
+      Start-Sleep -Milliseconds 100
+      if([WhaleSongWindowCommand]::GetForegroundWindow() -ne [IntPtr]$row.handle){Write-Failure 'control-failed';return}
+      [WhaleSongWindowCommand]::keybd_event(32,0,0,[UIntPtr]::Zero)
+      [WhaleSongWindowCommand]::keybd_event(32,0,2,[UIntPtr]::Zero)
+      Start-Sleep -Milliseconds 100
+    } finally {
+      if($minimized){[WhaleSongWindowCommand]::ShowWindow([IntPtr]$row.handle,6)|Out-Null}
+      if($previous -ne [IntPtr]::Zero){[WhaleSongWindowCommand]::SetForegroundWindow($previous)|Out-Null}
+    }
+  }
+  Write-Result @{ok=$true;did=$Cmd;appId='cloudmusic.exe';backend='window';verified=$false}
 }
 
 # The AppId is the only handle we have on a session, and reading it must never throw
@@ -185,6 +233,7 @@ try {
         Write-Diag ('skipping session: ' + $_.Exception.Message)
       }
     }
+    if ($rows.Count -eq 0) { $fallback=Get-NetEaseWindow; if($fallback){$fallback.Remove('handle');$rows+= $fallback} }
     Write-Result @{ ok = $true; sessions = $rows }
     exit 0
   }
@@ -195,7 +244,8 @@ try {
     if ($null -eq $session) {
       # No matching session == "nothing is playing as far as we are concerned". This is not
       # an error: the host turns it into nowPlaying:null and the frontend shows "not running".
-      Write-Result @{ ok = $true; nowPlaying = $null }
+      $fallback=Get-NetEaseWindow;if($fallback){$fallback.Remove('handle')}
+      Write-Result @{ ok = $true; nowPlaying = $fallback }
       exit 0
     }
     Write-Result @{ ok = $true; nowPlaying = (Read-SessionInfo $session) }
@@ -203,6 +253,7 @@ try {
   }
 
   if ($null -eq $session) {
+    $fallback=Get-NetEaseWindow;if($fallback){Invoke-NetEaseWindow $fallback;exit 0}
     Write-Failure 'no-session'
     exit 0
   }

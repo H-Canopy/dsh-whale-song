@@ -78,12 +78,12 @@ console.log('\n--- 页面与静态资源 ---')
   ok(app.text.indexOf('/dsh-pet/pet.js') >= 0, '壳页面引用 pet.js', '')
   const demo = await get('/dsh-pet/standalone/')
   ok(demo.status === 200 && /完整版/.test(demo.text), '/dsh-pet/standalone/ → 给外人看的 demo 页', 'status=' + demo.status)
-  for (const rel of ['/dsh-pet/vendor/pixi.min.js', '/dsh-pet/vendor/cubism4.min.js', '/dsh-pet/vendor/live2dcubismcore.min.js',
-    '/dsh-pet/model/manifest.json', '/dsh-pet/model/c_0120.model3.json', '/dsh-pet/model/c_0120.moc3']) {
+  for (const rel of ['/dsh-pet/vendor/pixi.min.js', '/dsh-pet/songm-renderer.js', '/dsh-pet/demo-whale.svg']) {
     const r = await get(rel)
     if (r.status !== 200) ok(false, '静态资源在位：' + rel, 'status=' + r.status)
   }
-  ok(true, '运行时 / 清单 / 模型本体都能从本地取到', '')
+  for(const rel of ['/dsh-pet/songm/master.png','/dsh-pet/songm/clips/idle.webm']){const r=await get(rel);ok(r.status===404,'生产资产未随公开服务提供：'+rel,'status='+r.status)}
+  ok(true, '公开运行时与通用示例可取', '')
   const trav = await get('/dsh-pet/model/../../../../Windows/win.ini')
   ok(trav.status === 403 || trav.status === 404, '目录穿越被拒（' + trav.status + '）', trav.text.slice(0, 80))
 }
@@ -205,10 +205,10 @@ if (!CHROME) {
       if (!window.dshwSongSMTC) return { missing: true }
       await window.dshwSongSMTC.load(true)
       const now = window.dshwSongSMTC.now()
-      return { players: (window.dshwSongSMTC.players() || []).length, playing: now ? now.playing : null, player: now ? now.player : null }
+      return { players: (window.dshwSongSMTC.players() || []).length, playing: now ? now.playing : null, player: now ? now.player : null, ready: window.dshwSongSMTC.ready() }
     })()`)
     console.log('  统一层现场：' + JSON.stringify(smtc))
-    ok(!!smtc && smtc.missing !== true && smtc.players > 0, '页面真读到了系统媒体会话（' + (smtc && smtc.players) + ' 个播放器）—— 独立模式也有音乐联动', JSON.stringify(smtc))
+    ok(!!smtc && smtc.missing !== true && smtc.ready === true && smtc.players >= 0, '媒体读取完成（允许没有播放器；当前 ' + (smtc && smtc.players) + ' 个播放器）—— 独立模式也有音乐联动', JSON.stringify(smtc))
   } catch (err) {
     ok(false, '壳服务的浏览器验证', String((err && err.message) || err))
   } finally {

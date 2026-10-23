@@ -30,6 +30,7 @@ const MIME = {
   '.mjs': 'application/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
+  '.svg': 'image/svg+xml',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
@@ -185,7 +186,7 @@ export function startPetServer(opts) {
           eventClients.add(res)
           res.on('close', () => eventClients.delete(res))
         }
-        if (dshLink.forward(req, res)) return
+        if (p !== '/dsh-pet/media' && dshLink.forward(req, res)) return
       }
       // —— 媒体会话（复用宿主那份实现：白名单、过滤器校验、缓存都在里面）——
       if (p === '/dsh-pet/media') {
@@ -207,7 +208,7 @@ export function startPetServer(opts) {
           const r = await media.control(body.cmd, body.app == null ? '' : String(body.app))
           if (!r.ok && r.error === 'bad-cmd') { json(res, 400, { ok: false, error: 'bad-cmd', reason: r.reason }); return }
           json(res, 200, r.ok
-            ? { ok: true, did: r.did, requested: r.requested, appId: r.appId || '', reason: '' }
+            ? { ok: true, did: r.did, requested: r.requested, appId: r.appId || '', backend:r.backend, verified:r.verified, reason: '' }
             : { ok: false, error: r.error, reason: r.reason || mediaReason(r.error) })
           return
         }
@@ -217,6 +218,8 @@ export function startPetServer(opts) {
 
       // —— 前端脚本：都从 assets/ 取（pet.js 的"发现宿主"探的就是这一条，必须 200）——
       const scriptMap = {
+        '/dsh-pet/songm-renderer.js': path.join(assetsDir, 'songm-renderer.js'),
+        '/dsh-pet/demo-whale.svg':path.join(assetsDir,'demo-whale.svg'),
         '/dsh-pet/pet.js': path.join(assetsDir, 'pet.js'),
         '/dsh-pet/media-smtc.js': path.join(assetsDir, 'media-smtc.js'),
         '/dsh-pet/media-local.js': path.join(assetsDir, 'media-local.js'),
@@ -254,8 +257,8 @@ export function startPetServer(opts) {
       }
 
       // —— 静态：模型与运行时 ——
-      if (p.startsWith('/dsh-pet/model/') || p.startsWith('/dsh-pet/vendor/')) {
-        const rel = p.replace(/^\/dsh-pet\/(model|vendor)\//, '$1/')
+      if (p.startsWith('/dsh-pet/model/') || p.startsWith('/dsh-pet/vendor/') || p.startsWith('/dsh-pet/songm/')) {
+        const rel = p.replace(/^\/dsh-pet\/(model|vendor|songm)\//, '$1/')
         const abs = path.resolve(assetsDir, rel)
         if (abs !== assetsDir && !abs.startsWith(assetsDir + path.sep)) { res.writeHead(403).end(); return }
         serveFile(res, abs, 'no-cache')

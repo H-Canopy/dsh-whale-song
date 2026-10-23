@@ -48,6 +48,7 @@ for (const [label, file] of SUITES) {
   const last = out.trim().split(/\r?\n/).filter((l) => /结果|pass \d+ \/ fail|失败/.test(l)).pop() || ''
   process.stdout.write(out.split(/\r?\n/).filter((l) => /^\s*(FAIL|失败项)/.test(l)).join('\n') + (out.match(/FAIL/) ? '\n' : ''))
   const okRun = r.status === 0
+  if (!okRun) process.stdout.write(out + '\n')
   results.push({ label, file, ok: okRun, summary: last.trim() || ('exit ' + r.status) })
 }
 

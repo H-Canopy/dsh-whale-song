@@ -1,8 +1,8 @@
 {
-  "name": "dsh-whale-song-standalone",
+  "name": "whalesong-next-desktop",
   "productName": "DS-WhaleSong-Pet",
-  "version": "0.2.0",
-  "description": "鲸歌统一桌宠：一只桌面 Live2D 伙伴，自动连接 DSH，会话联动、透明区域穿透、自由拖放、可开关自主漫游；DSH 关闭时保留独立陪伴。",
+  "version": "0.6.3",
+  "description": "鲸歌新版原创形象桌面预览",
   "main": "main.js",
   "author": "H-Canopy",
   "contributors": [

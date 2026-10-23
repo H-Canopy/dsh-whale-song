@@ -29,6 +29,7 @@ const MIME = {
   '.js': 'application/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
+  '.svg': 'image/svg+xml',
   '.html': 'text/html; charset=utf-8',
   '.moc3': 'application/octet-stream',
 }
@@ -173,6 +174,7 @@ const server = http.createServer((req, res) => {
     )
   }
 
+  if(url==='/dsh-pet/demo-whale.svg')return serveFile(res,path.join(ASSETS,'demo-whale.svg'))
   if (url.startsWith('/dsh-pet/vendor/')) {
     return serveFile(res, path.join(ASSETS, 'vendor', url.slice('/dsh-pet/vendor/'.length)))
   }

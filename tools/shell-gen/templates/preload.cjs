@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('dshPetNative', {
   dragEnd: (delta) => ipcRenderer.send('drag-end', delta),
   focusInput: (on, activate = false) => ipcRenderer.send('pet-focus', { on: !!on, activate: !!activate }),
   composition: (on) => ipcRenderer.send('pet-composition', !!on),
+  onRoam: (fn) => ipcRenderer.on('pet-roam', (_event, data) => fn(data || {})),
+  roamPhase: (data) => ipcRenderer.send('pet-roam-phase', data),
   onVisibility: (fn) => ipcRenderer.on('pet-visibility', (_event, visible) => fn(visible)),
   ready: (state) => ipcRenderer.send('pet-ready', state),
   requestRecovery: (reason) => ipcRenderer.send('pet-recover', String(reason)),

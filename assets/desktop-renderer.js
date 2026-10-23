@@ -78,7 +78,7 @@
       return cs.display !== 'none' && cs.visibility !== 'hidden' && Number(cs.opacity) > 0.05
         && cs.pointerEvents !== 'none' && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0
     }).map(rect)
-    const roamBlocked = !!document.querySelector('.dshp-menu.dshp-on,.dshp-composer.dshp-on,.dshp-hud.dshp-on,.dshp-panel.dshp-on')
+    const roamBlocked = !!document.querySelector('.dshp-menu.dshp-on,.dshp-composer.dshp-on,.dshp-hud.dshp-on,.dshp-panel.dshp-on') || !!pet.songmState?.()?.roamBlocked
     native.input({ body: input.body, model: input.model, mask: input.mask, maskAt: input.maskAt, renderAge: input.renderAge,
       recoveryId, panels, status: pet.state.agent.status, lowPower: pet.isLowPower(), roamBlocked })
   }
@@ -101,11 +101,12 @@
   window.addEventListener('mousedown', (e) => { if (native.traceInput) native.traceInput({ type: 'mousedown', x: e.clientX, y: e.clientY }) }, true)
   window.addEventListener('pointermove', (e) => {
     if (!down) { native.hover({ x: e.clientX, y: e.clientY }); return }
-    if (!(e.buttons & 1)) { native.dragEnd({ dx: down.dx, dy: down.dy }); down = null; return }
+    if (!(e.buttons & 1)) { window.DSHPet?.songmDrag?.(false); native.dragEnd({ dx: down.dx, dy: down.dy }); down = null; return }
     down.dx = e.screenX - down.x
     down.dy = e.screenY - down.y
     if (Math.hypot(down.dx, down.dy) < 4 && !down.moved) return
     down.moved = true
+    if (down.kind === 'model') window.DSHPet?.songmDrag?.(true, down.dx)
     native.dragMove({ dx: down.dx, dy: down.dy })
     e.preventDefault()
   }, true)
@@ -118,6 +119,7 @@
       was.dy = e.screenY - was.y
       if (Math.hypot(was.dx, was.dy) >= 4) was.moved = true
     }
+    window.DSHPet?.songmDrag?.(false)
     native.dragEnd({ dx: was.moved ? was.dx : 0, dy: was.moved ? was.dy : 0 })
     try { was.target.releasePointerCapture(was.id) } catch {}
     if (was.moved) {

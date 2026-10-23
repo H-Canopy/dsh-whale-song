@@ -19,7 +19,7 @@
 'use strict'
 // ⚠️ 本文件是**生成物**（由 lib/media-bridge.mjs 机械转换而来，见 tools 里的说明）。
 // 别直接改它 —— 要改逻辑请改 lib/media-bridge.mjs，然后重新生成：
-//   node D:\Bigfish\_staging\make-shell-cjs-bridge.mjs
+//   见仓库 tools/shell-gen/make-shell-cjs-bridge.mjs（由它生成）
 const path = require('node:path')
 const { spawn } = require('node:child_process')
 
@@ -157,13 +157,13 @@ function createMediaBridge(opts) {
         if (!r.ok) return { ok: false, error: r.error, reason: mediaReason(r.error) }
         const np = r.nowPlaying
         if (!np) return { ok: false, error: 'no-session', reason: mediaReason('no-session') }
-        actual = String(np.status) === 'Playing' ? 'pause' : 'play'
+        actual = np.backend === 'window' ? 'toggle' : String(np.status) === 'Playing' ? 'pause' : 'play'
       }
       const r = await run(actual, filter)
       // 控制成功后缓存**整体**作废：否则界面在 TTL 内还会显示旧状态
       cache.clear()
       if (!r.ok) return { ok: false, error: r.error, reason: mediaReason(r.error) }
-      return { ok: true, did: r.did || actual, requested: wanted, appId: r.appId || '', reason: '' }
+      return { ok: true, did: r.did || actual, requested: wanted, appId: r.appId || '', backend:r.backend||'smtc', verified:r.verified!==false, reason: '' }
     },
     /** 只读探测（排障用）：环境是否具备 SMTC 能力 */
     async probe() {

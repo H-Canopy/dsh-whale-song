@@ -165,7 +165,7 @@ check('注册了 control', exact.has('/dsh-pet/control'))
 check('注册了 state', exact.has('/dsh-pet/state'))
 check('注册了 diag', exact.has('/dsh-pet/diag'))
 check('注册了 standalone', exact.has('/dsh-pet/standalone'))
-check('注册了 model/vendor 前缀路由', prefixes.length === 2, prefixes.map((p) => p.path).join(', '))
+check('注册了 model/vendor 前缀路由', prefixes.length === 3, prefixes.map((p) => p.path).join(', '))
 check('挂了 index 注入', indexTaps.length === 1)
 
 const get = async (p) => {
@@ -182,47 +182,16 @@ check('pet.js 可取', pet.status === 200 && pet.buf.length > 10000, `${pet.buf.
 check('pet.js 注入了 boot 配置', pet.buf.toString('utf8').includes('__DSH_PET_BOOT__'))
 check('boot 配置在前端读取前注入', pet.buf.toString('utf8').indexOf(';window.__DSH_PET_BOOT__=') < pet.buf.toString('utf8').indexOf('const BOOT = window.__DSH_PET_BOOT__'))
 
-const model3 = await get('/dsh-pet/model/c_0120.model3.json')
-check('model3.json 可取', model3.status === 200 && model3.type.includes('json'))
-const m3 = JSON.parse(model3.buf.toString('utf8'))
-check('model3.json 注册了 Motions', !!(m3.FileReferences && m3.FileReferences.Motions && Object.keys(m3.FileReferences.Motions).length >= 8), Object.keys(m3.FileReferences?.Motions || {}).join(','))
-
-const moc = await get('/dsh-pet/model/c_0120.moc3')
-check('moc3 可取且是二进制', moc.status === 200 && moc.buf.length > 100000 && moc.buf.slice(0, 4).toString() === 'MOC3', `${moc.buf.length} 字节`)
-
-const tex = await get('/dsh-pet/model/c_0120.2048/texture_00.png')
-check('贴图可取（含中文目录外的嵌套路径）', tex.status === 200 && tex.type.includes('png'))
-
-// 中文名动作文件：浏览器发的是百分号编码，路由必须 decodeURIComponent，
-// 否则点「自拍」会静默播不动（MotionManager 只在控制台报 404）。
-const zhMotion = await get('/dsh-pet/model/motions/%E8%87%AA%E6%8B%8D.motion3.json')
-check(
-  '中文名动作文件可取（百分号编码）',
-  zhMotion.status === 200 && zhMotion.buf.length > 500 && JSON.parse(zhMotion.buf.toString('utf8')).Meta,
-  `${zhMotion.status} / ${zhMotion.buf.length} 字节`,
-)
-const zhMotion2 = await get('/dsh-pet/model/motions/' + encodeURIComponent('自拍简单.motion3.json'))
-check('中文名动作文件（第二例）', zhMotion2.status === 200, String(zhMotion2.status))
-// model3.json 里注册的每个动作文件都必须真的取得到
-let missing = []
-for (const [g, arr] of Object.entries(m3.FileReferences.Motions)) {
-  for (const it of arr) {
-    const r = await fetch(BASE + '/dsh-pet/model/' + it.File.split('/').map(encodeURIComponent).join('/'))
-    if (r.status !== 200) missing.push(g + ':' + it.File + '(' + r.status + ')')
-  }
+for (const file of ['master.png', 'expressions-source.png']) {
+  const image = await get('/dsh-pet/songm/' + file)
+  check('公开仓库不提供生产素材：' + file, image.status === 404)
 }
-check('model3.json 注册的动作全部可取', missing.length === 0, missing.join(', ') || '8/8 全部 200')
-
-const man = await get('/dsh-pet/model/manifest.json')
-const manifest = JSON.parse(man.buf.toString('utf8'))
-check('manifest 含 44 表情 / 8 动作', Object.keys(manifest.expressions).length === 44 && Object.keys(manifest.motions).length === 8, `${Object.keys(manifest.expressions).length} / ${Object.keys(manifest.motions).length}`)
-
-const core = await get('/dsh-pet/vendor/live2dcubismcore.min.js')
-check('Cubism Core 可取', core.status === 200 && core.buf.length > 100000, `${core.buf.length} 字节`)
+const renderer = await get('/dsh-pet/songm-renderer.js')
+check('新渲染器可取', renderer.status === 200 && renderer.buf.toString().includes('createSongmRenderer'))
+const legacy = await get('/dsh-pet/model/c_0120.moc3')
+check('发布包不含旧角色模型', legacy.status === 404)
 const pixi = await get('/dsh-pet/vendor/pixi.min.js')
-check('PIXI 可取', pixi.status === 200 && pixi.buf.length > 100000, `${pixi.buf.length} 字节`)
-const c4 = await get('/dsh-pet/vendor/cubism4.min.js')
-check('pixi-live2d-display 可取', c4.status === 200 && c4.buf.length > 100000, `${c4.buf.length} 字节`)
+check('PIXI 可取', pixi.status === 200 && pixi.buf.length > 100000)
 
 // 目录穿越
 const esc1 = await fetch(BASE + '/dsh-pet/model/../../../../etc/passwd')
@@ -609,7 +578,7 @@ check(
     !petCode.includes("corner = nearR ? 'br' : 'bl'"),
 )
 check('竖直位置只做「别被屏幕切掉」的软夹，不做吸附', /function clampY\(/.test(petCode) && petCode.includes('maxTop'))
-check('没注册 Expressions（避免和 rig 抢参数）', !JSON.parse(fs.readFileSync(path.join(ROOT, 'assets/model/c_0120.model3.json'), 'utf8')).FileReferences.Expressions)
+check('新形象不依赖旧 Live2D 模型', !fs.existsSync(path.join(ROOT, 'assets/model/c_0120.moc3')))
 
 // ————————————————————————————————————————————————————————————
 // 版本一致性：包版本与运行时上报的版本必须一样

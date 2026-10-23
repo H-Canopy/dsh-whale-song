@@ -1245,6 +1245,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
   }
 
   function playMotion(group, priority) {
+    if (songm) { songm.perform(group); return }
     if (!model || !manifest) return
     if (BANNED_MOTIONS.has(group)) return
     if (!manifest.motions || !manifest.motions[group]) {
@@ -1484,7 +1485,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       exclusive: spec.exclusive,
       ms,
     })
-    if (spec.line) ui.bubble.show(spec.line, { name: 'DS 鲸鱼娘', ttl: Math.max(ms, 1800) })
+    if (spec.line) ui.bubble.show(spec.line, { name: '鲸歌', ttl: Math.max(ms, 1800) })
     if (spec.motion) {
       playOneShot(spec.motion)
       // 只有**真的做动作**时才暂时不盯鼠标；单纯换个表情不该把视线也停掉，
@@ -1514,10 +1515,8 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       restoreCfg()   // 把上次保存的配置（CFG.*）套用回来
       ui = buildUI()
       await loadRuntime()
-      const [man, cdi] = await Promise.all([
-        fetch(BASE + '/model/manifest.json', { cache: 'no-cache' }).then((r) => r.json()),
-        fetch(BASE + '/model/c_0120.cdi3.json', { cache: 'no-cache' }).then((r) => r.json()),
-      ])
+      const man = { displayName: '鲸歌 · 新形象', expressions: {}, motions: {} }
+      const cdi = { Parameters: [] }
       manifest = man
       MODEL_PARAMS = new Set((cdi.Parameters || []).map((p) => p.Id))
       for (const [name, e] of Object.entries(manifest.expressions || {})) {
@@ -1603,6 +1602,12 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
   }
 
   async function loadRuntime() {
+    if (!window.PIXI) await loadScript(BASE + '/vendor/pixi.min.js')
+    await loadScript(BASE + '/songm-renderer.js')
+    return
+  }
+
+  async function loadLegacyRuntime() {
     if (!window.Live2DCubismCore) await loadScript(BASE + '/vendor/live2dcubismcore.min.js')
     if (!window.PIXI) await loadScript(BASE + '/vendor/pixi.min.js')
     if (!window.PIXI || !window.PIXI.live2d) await loadScript(BASE + '/vendor/cubism4.min.js')
@@ -1649,7 +1654,29 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     return PERF.low
   }
 
+  let songm = null
   async function buildModel() {
+    songm = await window.createSongmRenderer({ base: BASE, state: () => {
+      resolveRig()
+      return { mood, status: agent.status, gaze, music: window.dshwSongSMTC?.current?.(), lowPower: PERF.low, hidden: ui.root.classList.contains('dshp-hidden'), blocked: !!ui.root.querySelector('.dshp-menu.dshp-on,.dshp-composer.dshp-on,.dshp-panel.dshp-on,.dshp-hud.dshp-on') }
+    } })
+    app = songm.app
+    model = songm.model
+    coreModel = null
+    ui.stage.appendChild(app.view)
+    app.renderer.on('postrender', () => {
+      lastRenderAt = performance.now()
+      if (SHELL_MASK_LIVE && performance.now() - mask.lastBuild > 350) mask.dirty = true
+      if (mask.dirty && !mask.building) buildMask()
+    })
+    contentBox = { x0: 0, y0: 0, x1: 1, y1: 1, bands: null }
+    fitModel(undefined, true)
+    applyPosition(readLayout())
+    setBase('neutral', [])
+    window.__SONGM_READY__ = true
+  }
+
+  async function buildLegacyModel() {
     const layout = readLayout()
 
     app = new PIXI.Application({
@@ -2520,7 +2547,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     // 正在思考/看资料：把话说到气泡正文里，别只更新脚注（那样看着像在摸鱼）
     if (!rig.talking && ui.bubble.visible) {
       ui.bubble.show(pickFresh(SAY[stepDef.say], 'work-' + stepDef.say), {
-        name: 'DS 鲸鱼娘',
+        name: '鲸歌',
         busy: true,
         sticky: true,
       })
@@ -2541,7 +2568,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     const bubbleEl = $('div', 'dshp-bubble')
     const head = $('div', 'dshp-head')
     const dot = $('span', 'dshp-dot')
-    const headText = $('span', null, 'DS 鲸鱼娘')
+    const headText = $('span', null, '鲸歌')
     head.append(dot, headText)
     const body = $('div', 'dshp-body')
     const foot = $('div', 'dshp-foot')
@@ -2948,7 +2975,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       'contextmenu',
       (e) => {
         dshwRightTrace('contextmenu', { x: e.clientX, y: e.clientY, target: (e.target && e.target.className) || '' })
-        if (!hitTest(e.clientX, e.clientY)) { dshwRightTrace('miss', 'hitTest=false（点在模型的透明处，或掩码没就绪）'); return }
+        if (!hitTest(e.clientX,e.clientY) && ![-6,0,6].some(dx=>[-6,0,6].some(dy=>hitTest(e.clientX+dx,e.clientY+dy)))) { dshwRightTrace('miss', 'hitTest=false（点在模型的透明处，或掩码没就绪）'); return }
         e.preventDefault()
         e.stopPropagation()
         // 主人要求：右键弹「余额 / 本轮消耗 / 峰谷」这个框，不再直接弹设置菜单
@@ -2958,6 +2985,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
         try {
           const nowMs = Date.now()
           if (dshwSongLastRightAt && nowMs - dshwSongLastRightAt < 450) {
+            clearTimeout(dshwSongRightTimer)
             dshwRightTrace('double', { gapMs: nowMs - dshwSongLastRightAt })
             dshwSongLastRightAt = 0
             if (hud.open) closeHud()
@@ -2972,11 +3000,11 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
               let msg
               if (res && res.ok) {
                 const tail = (before && before.ok && before.title) ? '：' + before.title : ''
-                msg = (before && before.ok) ? ((before.playing ? '已暂停 ⏸' : '继续播放 ▶') + tail) : '音乐已切换 ✓'
+                msg = res.backend==='window' ? '已向网易云发送播放/暂停指令' : (before && before.ok) ? ((before.playing ? '已暂停 ⏸' : '继续播放 ▶') + tail) : '音乐已切换 ✓'
               } else {
                 msg = (res && res.reason) || (res && res.error) || '没检测到在放东西的播放器（放一首再试）'
               }
-              try { ui.bubble.show(msg, { name: 'DS 鲸鱼娘', ttl: 2000 }) } catch (err) {}
+              try { ui.bubble.show(msg, { name: '鲸歌', ttl: 2000 }) } catch (err) {}
             }
             if (r && typeof r.then === 'function') r.then(showToggleMsg, () => showToggleMsg(null))
             else showToggleMsg(r)
@@ -2984,8 +3012,8 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
           }
           dshwSongLastRightAt = nowMs
         } catch (err) {}
-        if (hud.open) closeHud()
-        else openHud({ flash: true, refresh: true })
+        clearTimeout(dshwSongRightTimer)
+        dshwSongRightTimer=setTimeout(()=>{dshwSongLastRightAt=0;if(hud.open)closeHud();else openHud({flash:true,refresh:true})},450)
       },
       true,
     )
@@ -3468,6 +3496,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
    * 到点一起收走。
    */
   function playAction(key) {
+    if (songm) { songm.perform(key); return }
     const a = ACTIONS[key]
     if (!a) return 0
     // 前置模式（照原作者的设计：自拍类得先掏出手机）
@@ -3759,7 +3788,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     if (!ui || !ui.root) return
     hidden = !!hidden
     if (ui.root.classList.contains('dshp-hidden') === hidden) return
-    if (hidden) closePanels()
+    if (hidden) { songm?.suspend(); closePanels() } else songm?.resume()
     ui.root.classList.toggle('dshp-hidden', !!hidden)
     document.body.classList.toggle('dshp-pet-hidden', !!hidden)
     if (hidden) ui.bubble.hide()
@@ -3863,9 +3892,9 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
           body: '{}',
         })
         const j = await r.json()
-        u.bubble.show(j.ok ? '打断啦' : '打断失败：' + (j.error || '未知'), { name: 'DS 鲸鱼娘', ttl: 2000 })
+        u.bubble.show(j.ok ? '打断啦' : '打断失败：' + (j.error || '未知'), { name: '鲸歌', ttl: 2000 })
       } catch (err) {
-        u.bubble.show('打断失败：' + err.message, { name: 'DS 鲸鱼娘', ttl: 2600 })
+        u.bubble.show('打断失败：' + err.message, { name: '鲸歌', ttl: 2600 })
       }
     })
 
@@ -3888,7 +3917,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
         closePanels()
         act({ mood: 'listening', props: IDLE_PROPS, line: text, ms: 2600 })
       } catch (err) {
-        u.bubble.show('发不出去：' + err.message, { name: 'DS 鲸鱼娘', sticky: true })
+        u.bubble.show('发不出去：' + err.message, { name: '鲸歌', sticky: true })
       } finally {
         send.disabled = false
       }
@@ -3967,6 +3996,28 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
   }
 
   function renderPane(id) {
+    if (songm && ['face', 'decor', 'scene', 'action'].includes(id)) {
+      const panes = ui.menu.panes
+      panes.textContent = ''
+      const entries = id === 'face' ? [
+        ['平常', 'neutral'], ['认真想想', 'thinking'], ['小得意', 'happy'],
+        ['有点疑惑', 'confused'], ['困了', 'sleepy'], ['开心笑', 'love']
+      ] : songm.actions().map(({label,key}) => [label,key])
+      if (id === 'decor' || id === 'scene') {
+        panes.appendChild($('div', 'dshp-hint', '鲸歌使用自己的鲸鱼帽与冬装。更多装饰和场景正在制作。'))
+        return
+      }
+      const grid = $('div', 'dshp-grid')
+      for (const [label, value] of entries) {
+        const button = $('button', 'dshp-chip', label)
+        button.addEventListener('click', () => id === 'face'
+          ? setReaction({ mood: value, ms: 6000 }) : songm.perform(value))
+        grid.appendChild(button)
+      }
+      panes.appendChild(grid)
+      panes.appendChild($('div', 'dshp-hint', '任务状态会自动驱动表情；手动预览后恢复。'))
+      return
+    }
     const panes = ui.menu.panes
     panes.textContent = ''
     // 顶上永远有一行「她现在是什么状态」，免得一堆按钮里看不出哪个是开着的
@@ -3990,7 +4041,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       const showResult = (label, r) => {
         const ok = r && (r.ok === true || typeof r.then === 'function')
         const msg = (r && r.reason) ? r.reason : ((r && r.error) ? String(r.error) : '挂件没装，遥控不可用')
-        try { ui.bubble.show(ok ? (label + ' ✓') : msg, { name: 'DS 鲸鱼娘', ttl: 2200 }) } catch (err) {}
+        try { ui.bubble.show(ok ? (label + ' ✓') : msg, { name: '鲸歌', ttl: 2200 }) } catch (err) {}
       }
 
       if (smtc && typeof smtc.enabled === 'function' && !smtc.enabled()) {
@@ -3998,6 +4049,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       } else if (smtc) {
         const players = (typeof smtc.players === 'function' ? smtc.players() : []) || []
         const cur = (typeof smtc.current === 'function' ? smtc.current() : null) || null
+        if(cur?.backend==='window')mbox.appendChild($('div','dshp-hint','网易云兼容模式：播放/暂停会短暂激活网易云后恢复焦点；播放状态未知，切歌需系统媒体接口。'))
         const pin = (typeof smtc.picked === 'function' ? smtc.picked() : '') || ''
         if (!players.length) {
           mbox.appendChild($('div', 'dshp-hint', '还没检测到正在放东西的播放器（打开网易云/QQ音乐/PotPlayer 随便放一首，这里几秒内就会出现）'))
@@ -4024,7 +4076,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
           }
         }
         mbox.appendChild($('div', 'dshp-hint', cur && cur.title
-          ? ('正在' + (cur.playing ? '播放' : '暂停') + '：' + cur.title + (cur.artist ? ' — ' + cur.artist : '') + '（' + cur.name + '）')
+          ? ((cur.status==='Unknown'?'播放状态未知':'正在'+(cur.playing?'播放':'暂停')) + '：' + cur.title + (cur.artist ? ' — ' + cur.artist : '') + '（' + cur.name + '）')
           : '现在没在放什么'))
       } else {
         const nowFn = (typeof window !== 'undefined' && typeof window.dshwMediaNow === 'function') ? window.dshwMediaNow : null
@@ -4104,7 +4156,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
           dbtn.addEventListener('click', () => {
             local.setDir(String(dinp.value || '').trim()).then((r) => {
               try {
-                ui.bubble.show((r && r.ok) ? '歌单已切换' : ((r && r.error) || '这个文件夹用不了'), { name: 'DS 鲸鱼娘', ttl: 2400 })
+                ui.bubble.show((r && r.ok) ? '歌单已切换' : ((r && r.error) || '这个文件夹用不了'), { name: '鲸歌', ttl: 2400 })
               } catch (err) {}
               renderPane('music')
             })
@@ -4393,7 +4445,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
         try {
           if (shell.on) shell.post('host:' + v)
           ui.bubble.show('好，下次连' + (v === 'auto' ? '自动挑' : v === 'desktop' ? '桌面版' : '网页版'), {
-            name: 'DS 鲸鱼娘',
+            name: '鲸歌',
             ttl: 2200,
           })
         } catch (err) {}
@@ -4412,7 +4464,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     resetAll.addEventListener('click', () => {
       resetEverything()
       renderPane('setting')
-      ui.bubble.show('回到平常状态啦', { name: 'DS 鲸鱼娘', ttl: 2200 })
+      ui.bubble.show('回到平常状态啦', { name: '鲸歌', ttl: 2200 })
     })
     row0.appendChild(resetAll)
     box.append(hostRow, hostHint, themeRow, row0)
@@ -4477,7 +4529,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       })
       const quitApp = $('button', 'dshp-btn', '彻底关闭桌宠应用')
       quitApp.addEventListener('click', () => {
-        ui.bubble.show('人家先退下了，想叫我就去「应用程序」里双击我～', { name: 'DS 鲸鱼娘', ttl: 2000 })
+        ui.bubble.show('人家先退下了，想叫我就去「应用程序」里双击我～', { name: '鲸歌', ttl: 2000 })
         setTimeout(() => shell.post('quit'), 220)
       })
       row3.append(toBall, quitApp)
@@ -4561,6 +4613,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
   }
 
   function handleEvent(m) {
+    if (['turn-start', 'tool-call', 'tool-result', 'approval', 'turn-end'].includes(m.t)) songm?.cancelAction()
     switch (m.t) {
       case 'hello':
         agent.status = m.status || 'idle'
@@ -4594,7 +4647,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
         startWork()
         stopActing()
         setBase('thinking', WORK_PROPS)
-        ui.bubble.show(pick(SAY.start), { name: 'DS 鲸鱼娘', busy: true, sticky: true })
+        ui.bubble.show(pick(SAY.start), { name: '鲸歌', busy: true, sticky: true })
         break
 
       case 'step-start':
@@ -4602,7 +4655,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
         setStatus('thinking')
         rig.talking = false
         if (!ui.bubble.visible) {
-          ui.bubble.show(pickFresh(SAY.thinking, 'thinking'), { name: 'DS 鲸鱼娘', busy: true, sticky: true })
+          ui.bubble.show(pickFresh(SAY.thinking, 'thinking'), { name: '鲸歌', busy: true, sticky: true })
         } else {
           ui.bubble.note('正在思考 · 第 ' + m.step + ' 步')
         }
@@ -4616,7 +4669,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
           setStatus('speaking')
           rig.talking = true
           setBase('happy', WORK_PROPS)
-          ui.bubble.show('', { name: 'DS 鲸鱼娘', stream: true, sticky: true })
+          ui.bubble.show('', { name: '鲸歌', stream: true, sticky: true })
         }
         ui.bubble.show(m.text || '', { stream: true, sticky: true })
         break
@@ -4628,7 +4681,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
         if (m.text) {
           setStatus('speaking')
           agent.lastText = m.text.slice(0, 4000)
-          ui.bubble.show(agent.lastText, { name: 'DS 鲸鱼娘', sticky: true })
+          ui.bubble.show(agent.lastText, { name: '鲸歌', sticky: true })
         dshwSongBrief(agent.lastText)   // 鲸歌增量：简报分档 off/stats/full（见文件末尾）
         }
         if (m.usage) {
@@ -4668,7 +4721,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
         const line = pickFresh(pool, 'tool-' + m.name)
         const hint = toolHint(m.args)
         ui.bubble.show(line + (hint ? '\n' + hint : ''), {
-          name: 'DS 鲸鱼娘',
+          name: '鲸歌',
           busy: true,
           sticky: true,
         })
@@ -4715,6 +4768,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       }
 
       case 'turn-end': {
+        if (((m.reason && m.reason.kind) || m.reason || 'completed') === 'completed') songm?.perform('success')
         const kind = (m.reason && m.reason.kind) || m.reason || 'completed'
         rig.talking = false
         agent.hasStream = false
@@ -4756,7 +4810,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
             if (stat.length) ui.bubble.note(stat.join(' · '))
             setTimeout(() => {
               if (agent.status !== 'idle') return
-              ui.bubble.show(pickFresh(SAY.done, 'done'), { name: 'DS 鲸鱼娘', ttl: 4200 })
+              ui.bubble.show(pickFresh(SAY.done, 'done'), { name: '鲸歌', ttl: 4200 })
             }, 2800)
           }
         } else if (kind === 'aborted') {
@@ -4817,7 +4871,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     }
     if (m.motion) playMotion(m.motion)
     const text = m.say || m.bubble
-    if (text) ui.bubble.show(String(text), { name: 'DS 鲸鱼娘', ttl: m.bubbleMs || 5000 })
+    if (text) ui.bubble.show(String(text), { name: '鲸歌', ttl: m.bubbleMs || 5000 })
     // 工作简报（/dsh-pet/control 的 report 字段）：头顶挂信封，点开是大号面板
     if (m.report) {
       try {
@@ -4975,7 +5029,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       if (idle.sleep === 0 && quiet > CFG.sleepAfterMs) {
         idle.sleep = 2
         setBase('sleepy', IDLE_PROPS)
-        ui.bubble.show(pick(['Zzz…', '（打瞌睡）', '（趴桌上睡着了）']), { name: 'DS 鲸鱼娘', ttl: 9000 })
+        ui.bubble.show(pick(['Zzz…', '（打瞌睡）', '（趴桌上睡着了）']), { name: '鲸歌', ttl: 9000 })
       } else if (idle.sleep === 0 && quiet > CFG.sleepAfterMs * 0.55 && Math.random() < 0.4) {
         // 打哈欠
         act({ mood: 'sleepy', props: IDLE_PROPS, line: '（打了个哈欠）', ms: 2600 })
@@ -4989,6 +5043,10 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
   window.DSHPet = {
     setBase,
     setReaction,
+    songmState: () => songm?.snapshot(),
+    songmDrag: (active, dx = 0) => songm?.drag(active, dx),
+    songmRoam: (event) => songm?.setRoam(event),
+    previewEvent: (event) => { if (new URLSearchParams(location.search).has('preview')) handleEvent(event) },
     clearReaction,
     setUserFace,
     clearUserFace,
@@ -5122,12 +5180,13 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       if (!window.__DSHPET_SHELL__) return
       mask.dirty = true
       if (!app || !model || !lastView) return false
+      songm?.resume()
       app.start()
       PIXI.Ticker.shared.start()
       app.renderer.render(app.stage)
       return true
     },
-    pauseDesktop: () => { if (window.__DSHPET_SHELL__ && app) app.stop() },
+    pauseDesktop: () => { if (window.__DSHPET_SHELL__ && app) { songm?.suspend(); app.stop() } },
     /** 壳子告诉页面「你记着的连接档位是哪一档」（设置页据此高亮） */
     setHostPref: (v) => {
       try {
@@ -5186,6 +5245,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     },
     /** 诊断用：一次动作有哪些可选（测试逐项点一遍）。 */
     actions() {
+      if (songm) return songm.actions()
       return ACTION_KEYS.map((k) => ({ key: k, label: ACTIONS[k].label, expr: ACTIONS[k].expr || null, motion: ACTIONS[k].motion || null, ms: ACTIONS[k].ms }))
     },
     /** 诊断用：直接演一个一次性动作。 */
@@ -5283,6 +5343,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
     },
     /** 诊断用：列出所有可用表情名与道具 key。 */
     catalog() {
+      if (songm) return { faces: ['neutral','thinking','happy','confused','sleepy','love'], actions: songm.actions().map(a=>a.key), decor: [], scene: [] }
       return {
         expressions: Object.keys(EXPR),
         // 菜单的三类：装饰（常驻）/ 场景（常驻）/ 动作（一次性）
@@ -5423,6 +5484,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
   var dshwSongOrigPushReport = pushReport
   // 右键双击（=播放/暂停）的上一击时间戳；0 表示没有待配对的单击。
   // 用 var 声明在这里也能被前面的 contextmenu 处理器读到（函数作用域内变量提升）。
+  var dshwSongRightTimer=null
   var dshwSongLastRightAt = 0
   /**
    * 右键自检：只在 URL 带 `?dshpDebug=1` 时记录，缓冲最近 40 条。
@@ -5538,7 +5600,7 @@ body.dshp-pet-hidden .dshp-tab{display:flex}
       const cur = t.currency ? String(t.currency) : 'CNY'
       const sym = (cur === 'USD') ? '$' : '¥'
       const bal = (hud && typeof hud.balance === 'number') ? (' · 余额 ' + sym + Number(hud.balance).toFixed(2)) : ''
-      try { ui.bubble.show('这几轮花了 ' + sym + spent.toFixed(2) + bal, { name: 'DS 鲸鱼娘', ttl: 4200 }) } catch (err) {}
+      try { ui.bubble.show('这几轮花了 ' + sym + spent.toFixed(2) + bal, { name: '鲸歌', ttl: 4200 }) } catch (err) {}
     } catch (err) {}
   }
   try { setInterval(dshwSongSpendTick, 5000) } catch (err) {}
