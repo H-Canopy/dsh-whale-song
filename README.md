@@ -1,30 +1,104 @@
-# 鲸歌 · WhaleSong
+<div align="center">
 
-鲸歌是由H-Canopy独立维护的桌面伙伴项目，支持角色互动、任务状态反馈、DSH对话与钱包联动，以及音乐控制。
+<img src="docs/images/hero.webp" width="320" alt="鲸歌 WhaleSong" />
 
-**程序代码开放，正式角色资产不随仓库提供。** 本仓库提供通用鲸鱼示例用于运行与开发；正式鲸歌的动画视频、高清母图、表情图集、源工程和生成提示词保留在本地。
+<h1>鲸歌 · WhaleSong</h1>
 
-![公开示例：通用鲸鱼（DEMO）](assets/demo-whale.svg)
+<p><b>住在你桌面上的鲸。</b><br/>桌面伙伴 · DSH 联动 · 音乐控制</p>
 
-公开示例只带这只标着 DEMO 的通用鲸鱼；正式鲸歌的形象、动画与表情图集不随仓库提供，图片使用范围见[资产说明](ASSET_POLICY.md)。
+[![License](https://img.shields.io/badge/license-MIT-2563eb.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/H-Canopy/dsh-whale-song?color=2563eb&label=release)](../../releases)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0ea5e9.svg)](#快速开始)
+[![Electron](https://img.shields.io/badge/electron-33-47848f.svg)](package.json)
+[![Assets](https://img.shields.io/badge/%E8%A7%92%E8%89%B2%E8%B5%84%E4%BA%A7-%E4%B8%8D%E9%9A%8F%E4%BB%93%E5%BA%93%E6%8F%90%E4%BE%9B-f59e0b.svg)](ASSET_POLICY.md)
 
-## 运行公开示例
+</div>
 
-需要Node.js与Electron。运行`npm install`，再运行`npm run desktop:start`。仓库缺少正式资产时自动显示标有DEMO的通用鲸鱼，聊天与媒体等能力依赖相应服务或播放器；示例不提供正式鲸歌的视频动作。
+> [!IMPORTANT]
+> 程序代码以 MIT 开放；**正式角色的图片、动画、表情图集与源工程不随仓库提供**。
+> 没有正式资产时，她会以一只标着 `DEMO` 的通用鲸鱼出现——功能与代码完全一致。
 
-已有合法私有资产的维护者可在本地保留`assets/songm/`，目录已默认忽略，切勿提交。正式素材缺失时不会自动从互联网下载。不要把本地完整版、生产素材或含素材的安装包上传到本仓库、Release或npm。
+## 特性
 
-## 功能与限制
+| | 能力 | 说明 |
+| :--: | --- | --- |
+| 🪟 | **脱离 DSH 独立运行** | 自带 Electron 桌面壳（Windows）：透明窗口、置顶、穿透、拖动、收起、150–280 缩放、低功耗。DSH 没开，她也在。 |
+| 🔗 | **DSH 联动** | 对话、任务状态、钱包余额实时反映在她身上；点她一下就能直接跟 agent 说话。 |
+| 🎵 | **音乐控制** | 本地音乐 / 在线电台（Radio Browser · SomaFM）/ 网易云联动；右键双击播放暂停，优先走系统媒体会话（SMTC）。 |
+| 🧩 | **可开发** | 50+ 个测试与诊断脚本、行为断言闸门、资产边界审计（CI 每次提交都跑）。 |
 
-- 桌面透明窗口、拖动、收起恢复、缩放与低功耗。
-- DSH连接增强：对话、任务状态、钱包；独立运行不要求DSH持续在线。
-- 音乐页与右键双击播放/暂停。优先系统媒体会话；部分网易云版本的兼容控制会短暂激活网易云再恢复焦点，不能读取可靠播放状态，切歌需系统媒体支持。
-- 正式资产版本支持视频待机、阅读、哈欠、伸懒腰、转圈与跑步；这些视频不包含在公开源码中。
+## 快速开始
 
-## 开发与资产保护
+**一、装进 DSH**（Web 界面右下角那一位）
 
-运行`node tools/test-all.mjs`验证程序，运行`python tools/audit-public-assets.py`检查当前公开文件树。媒体素材、生成提示词、高清生产图片和素材包不得混入提交。资产目录的.gitignore规则不是唯一保护措施，CI还会检查被跟踪文件。
+```bash
+dsh plugin --profile web add github:H-Canopy/dsh-whale-song
+```
+
+**二、桌面独立版**（不需要 DSH，需要 Node.js 18+ 与 Windows 10/11）
+
+```bash
+npm install
+npm run desktop:start
+```
+
+**三、只看不装**
+
+```bash
+npm install
+npm run preview
+```
+
+## 她能做什么
+
+- 跟着 agent 的真实状态换表情与动作：待机、思考、干活、报错、收工。
+- 点她一下 → 说话；500ms 内在同一处再点 → 打开对话框。
+- 右键 → 换表情 / 换装 / 摆场景 / 演动作 / 音乐。
+- 闲置时自己慢慢挪个位置（拖动或打字时自动暂停）。
+- 装了正式资产时还有视频动作：待机、阅读、哈欠、伸懒腰、转圈、跑步。
+
+## 仓库结构
+
+```text
+assets/      渲染层与行为脚本（pet.js、media-*）
+lib/         插件入口与媒体服务
+desktop/     Windows 桌面壳
+standalone/  单页预览
+sources/     音乐源适配（本地 / 电台 / 网易云）
+skill/       DSH skill：教 agent 怎么驱动她
+tools/       测试、诊断、打包、发布
+docs/        文档与展示图
+```
+
+## 资产与许可
+
+| 内容 | 许可 |
+| --- | --- |
+| 程序代码 | MIT，保留原作者与许可声明 |
+| `assets/demo-whale.svg`（通用示例） | MIT |
+| 正式角色形象 / 动画 / 表情图集 / 源工程 | **保留所有权利**，不随仓库提供 |
+| `docs/images/` 下的展示图 | 仅用于项目介绍，不授予提取、再分发、改编或商用 |
+
+细则见 [ASSET_POLICY.md](ASSET_POLICY.md)、[NOTICE.md](NOTICE.md)、[AUTHORS.md](AUTHORS.md)、[PROVENANCE.md](PROVENANCE.md)。
+
+## 开发
+
+```bash
+npm run test:all                    # 全量行为断言
+python tools/audit-public-assets.py # 资产边界审计
+npm run desktop:dist                # 打 Windows 包
+```
+
+改动请先读 [CONTRIBUTING.md](CONTRIBUTING.md)：**不要把角色资产提交进仓库**，CI 会拦。
+
+## 致谢
+
+- [Andersen216](https://github.com/Andersen216) —— 原桌宠插件与桌面壳（MIT）
+- 上善无形 —— 鲸鱼娘角色原作「溟月」
+- ZipZipPipe —— 女仆鲸鱼娘二次设计
+- 氵六青 —— Live2D 模型制作（绑定 / 动作 / 表情）
 
 ## 来源
 
-代码基于[Andersen216/dsh-whale-girl-live2d](https://github.com/Andersen216/dsh-whale-girl-live2d)的MIT代码持续改造，保留原作者与许可。鲸歌的品牌、形象与动作按自身方向维护。代码MIT许可不自动授权正式角色资产，详见[NOTICE](NOTICE.md)。
+代码起点是 [Andersen216/dsh-whale-girl-live2d](https://github.com/Andersen216/dsh-whale-girl-live2d)（MIT）。
+鲸歌自 2026 年 10 月起独立维护，品牌、形象与动作按自己的方向走；代码的来源不构成角色资产的授权。

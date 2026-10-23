@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用问题 / 讨论
+    url: https://github.com/H-Canopy/dsh-whale-song/discussions
+    about: 装不上、看不到她、想知道怎么用 —— 先在这儿聊
+  - name: 安全问题
+    url: https://github.com/H-Canopy/dsh-whale-song/security/advisories/new
+    about: 请走私密渠道，不要公开开 issue

@@ -1,0 +1,28 @@
+name: 提一个想法
+description: 想让她多做点什么
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: 你希望她做什么
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: 为什么
+      description: 现在哪一步让你别扭
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: 属于哪块
+      options:
+        - 桌面壳（窗口 / 拖动 / 位置）
+        - 行为与表情
+        - DSH 联动
+        - 音乐
+        - 文档 / 安装
+        - 其他

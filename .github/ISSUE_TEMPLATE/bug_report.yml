@@ -1,0 +1,47 @@
+name: 报告问题
+description: 她不动了、装不上、窗口不正常
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "先确认：`npm run test:all` 是否通过？通过的话多半是环境问题。",
+  - type: textarea
+    id: what
+    attributes:
+      label: 现象
+      description: 你看到什么，期望看到什么
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. npm install
+        2. npm run desktop:start
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: 运行方式
+      options:
+        - 桌面独立版（npm run desktop:start）
+        - DSH 插件
+        - 单页预览（npm run preview）
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: 环境
+      placeholder: Windows 11 23H2 / Node 20.11 / 屏幕缩放 125%
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志或截图
+      description: 控制台报错粘在这里；窗口问题请附截图
+      render: shell
